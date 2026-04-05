@@ -252,11 +252,77 @@ function fileToAttachment(file) {
   };
 }
 
+function extractEmails(value) {
+  if (!value) {
+    return [];
+  }
+
+  const normalized = Array.isArray(value) ? value.join(',') : String(value);
+  const matches = normalized.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
+  return matches ? [...new Set(matches.map((item) => item.toLowerCase()))] : [];
+}
+
+function uniqueEmails(...groups) {
+  return [...new Set(groups.flat().filter(Boolean))];
+}
+
+function replyRecipientsFromArticle(article, fallbackCustomerEmail) {
+  const customerEmail = extractEmails(fallbackCustomerEmail);
+  if (!article) {
+    return {
+      to: customerEmail[0] || null,
+      cc: [],
+    };
+  }
+
+  const sender = String(article.sender || '').toLowerCase();
+  const from = extractEmails(article.from);
+  const to = extractEmails(article.to);
+  const cc = extractEmails(article.cc);
+
+  if (sender === 'customer') {
+    const recipients = uniqueEmails(from, cc, customerEmail);
+    return {
+      to: recipients[0] || null,
+      cc: recipients.slice(1),
+    };
+  }
+
+  const recipients = uniqueEmails(to, cc, customerEmail, from);
+  return {
+    to: recipients[0] || null,
+    cc: recipients.slice(1),
+  };
+}
+
+function latestCustomerVisibleArticle(articles) {
+  return [...articles]
+    .filter((article) => !article.internal)
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0] || null;
+}
+
 async function addArticle(ticketId, articlePayload, files = []) {
   const payload = {
     ...articlePayload,
     ticket_id: ticketId,
   };
+
+  if (payload.type === 'email') {
+    const ticket = await getTicket(ticketId);
+    const latestArticle = latestCustomerVisibleArticle(ticket.articles || []);
+    const recipients = replyRecipientsFromArticle(latestArticle, ticket.customer?.email);
+
+    if (!recipients.to) {
+      const error = new Error('Unable to determine a valid customer recipient from the latest visible update.');
+      error.status = 422;
+      throw error;
+    }
+
+    payload.to = recipients.to;
+    if (recipients.cc.length > 0) {
+      payload.cc = recipients.cc.join(', ');
+    }
+  }
 
   if (files.length > 0) {
     payload.attachments = files.map(fileToAttachment);
