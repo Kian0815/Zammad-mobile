@@ -4,7 +4,16 @@ import { formatDistanceToNowStrict, formatISO9075 } from 'date-fns';
 import clsx from 'clsx';
 import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { api } from './api';
-import type { LookupsResponse, OwnerOption, QueueOption, Session, TicketCard, TicketDetail, ViewKey } from './types';
+import type {
+  LookupsResponse,
+  OwnerOption,
+  QueueOption,
+  Session,
+  TicketCard,
+  TicketDetail,
+  ViewKey,
+  WorkflowMacroOption,
+} from './types';
 
 const VIEW_ORDER: ViewKey[] = ['myOpen', 'unassigned', 'waitingCustomer', 'escalated'];
 const apiBase = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '');
@@ -129,6 +138,7 @@ function TicketComposer({
   const [ownerId, setOwnerId] = useState(String(ticket.owner_id || lookups.defaultOwnerId));
   const [state, setState] = useState(ticket.state_name);
   const [priority, setPriority] = useState(ticket.priority_name);
+  const [workflowMacro, setWorkflowMacro] = useState('');
   const [files, setFiles] = useState<FileList | null>(null);
 
   useEffect(() => {
@@ -136,6 +146,7 @@ function TicketComposer({
     setOwnerId(String(ticket.owner_id || lookups.defaultOwnerId));
     setState(ticket.state_name);
     setPriority(ticket.priority_name);
+    setWorkflowMacro('');
   }, [ticket, lookups.defaultOwnerId]);
 
   const mutation = useMutation({
@@ -143,8 +154,11 @@ function TicketComposer({
       if (ownerId !== String(ticket.owner_id || '')) {
         await api.updateTicket(ticket.id, { owner_id: Number(ownerId) });
       }
-      if (state !== ticket.state_name || priority !== ticket.priority_name) {
-        await api.updateTicket(ticket.id, { state, priority });
+      if (priority !== ticket.priority_name || (!workflowMacro && state !== ticket.state_name)) {
+        await api.updateTicket(ticket.id, {
+          priority,
+          ...(workflowMacro ? {} : { state }),
+        });
       }
       if (body.trim()) {
         const formData = new FormData();
@@ -154,10 +168,14 @@ function TicketComposer({
         Array.from(files || []).forEach((file) => formData.append('attachments', file));
         await api.addArticle(ticket.id, formData);
       }
+      if (workflowMacro) {
+        await api.applyMacro(ticket.id, workflowMacro);
+      }
     },
     onSuccess: async () => {
       setBody('');
       setFiles(null);
+      setWorkflowMacro('');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['ticket', ticket.id] }),
         queryClient.invalidateQueries({ queryKey: ['tickets'] }),
@@ -222,6 +240,18 @@ function TicketComposer({
             {lookups.priorities.map((entry) => (
               <option key={entry.id} value={entry.name}>
                 {entry.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field">
+          <span>Next status via macro</span>
+          <select value={workflowMacro} onChange={(event) => setWorkflowMacro(event.target.value)} disabled={readOnlyMode}>
+            <option value="">No macro</option>
+            {lookups.workflowMacros.map((entry: WorkflowMacroOption) => (
+              <option key={entry.key} value={entry.key}>
+                {entry.label}
               </option>
             ))}
           </select>

@@ -244,6 +244,19 @@ async function updateTicket(ticketId, payload) {
   });
 }
 
+async function applyMacro(ticketId, macroId) {
+  return zammadJson('/api/v1/tickets/mass_macro', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      ticket_ids: [ticketId],
+      macro_id: macroId,
+    }),
+  });
+}
+
 function fileToAttachment(file) {
   return {
     filename: file.originalname,
@@ -348,6 +361,7 @@ async function getLookups() {
       key: queue.key,
       label: queue.label,
     })),
+    workflowMacros: config.powerdns.workflowMacros,
   };
 }
 
@@ -362,6 +376,7 @@ async function getAttachment(ticketId, articleId, attachmentId, view = 'download
 
 module.exports = {
   addArticle,
+  applyMacro,
   getAttachment,
   getLookups,
   getTicket,

@@ -73,4 +73,11 @@ export const api = {
       body: formData,
     });
   },
+  applyMacro(ticketId: number, macroKey: string) {
+    return request(`${apiBase}/tickets/${ticketId}/macro`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ macroKey }),
+    });
+  },
 };

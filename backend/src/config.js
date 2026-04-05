@@ -61,6 +61,25 @@ function parseOwnerOptions(value) {
     .filter(Boolean);
 }
 
+function parseMacroOptions(value, fallback = '') {
+  return parseCsv(value || fallback)
+    .map((item) => {
+      const [keyPart, idPart, ...labelParts] = item.split(':');
+      const key = String(keyPart || '').trim();
+      const id = Number.parseInt(String(idPart || '').trim(), 10);
+      if (!key || !Number.isInteger(id)) {
+        return null;
+      }
+
+      return {
+        key,
+        id,
+        label: labelParts.join(':').trim() || key,
+      };
+    })
+    .filter(Boolean);
+}
+
 const config = {
   env: process.env.NODE_ENV || 'development',
   port: parseIntValue(process.env.PORT, 3001),
@@ -86,6 +105,10 @@ const config = {
     customerIds: parseIntList(process.env.POWERDNS_CUSTOMER_IDS),
     defaultOwnerId: parseIntValue(process.env.POWERDNS_DEFAULT_OWNER_ID, 214),
     ownerOptions: parseOwnerOptions(process.env.POWERDNS_OWNER_OPTIONS || '214:Antonio Frisina'),
+    workflowMacros: parseMacroOptions(
+      process.env.POWERDNS_WORKFLOW_MACROS,
+      'waitingCustomer:2:Waiting for customer +7d,processing:18:Processing +7d,pendingAutoclose3:16:Pending autoclose +3d',
+    ),
     unassignedOwnerIds: parseIntList(process.env.UNASSIGNED_OWNER_IDS || '1'),
     waitingCustomerStates: parseCsv(process.env.WAITING_CUSTOMER_STATE_NAMES || 'waiting for customer,pending reminder,pending action')
       .map((state) => state.toLowerCase()),

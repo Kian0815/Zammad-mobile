@@ -8,7 +8,7 @@ const morgan = require('morgan');
 const multer = require('multer');
 const { audit } = require('./audit');
 const { config, validateConfig } = require('./config');
-const { addArticle, getAttachment, getLookups, getTicket, listPowerDnsTickets, updateTicket } = require('./zammad');
+const { addArticle, applyMacro, getAttachment, getLookups, getTicket, listPowerDnsTickets, updateTicket } = require('./zammad');
 
 validateConfig();
 
@@ -275,6 +275,29 @@ app.post('/api/tickets/:ticketId/articles', requireAuth, requireWritable, upload
       attachments: (req.files || []).map((file) => file.originalname),
     });
     return res.status(201).json(article);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/tickets/:ticketId/macro', requireAuth, requireWritable, async (req, res, next) => {
+  try {
+    const ticketId = Number.parseInt(req.params.ticketId, 10);
+    const macroKey = String(req.body?.macroKey || '').trim();
+    const macro = config.powerdns.workflowMacros.find((entry) => entry.key === macroKey);
+
+    if (!macro) {
+      return res.status(400).json({ error: 'Unknown workflow macro.' });
+    }
+
+    const result = await applyMacro(ticketId, macro.id);
+    audit('ticket.macro.apply', {
+      username: req.session.username,
+      ticketId,
+      macroKey: macro.key,
+      macroId: macro.id,
+    });
+    return res.status(200).json(result);
   } catch (error) {
     return next(error);
   }

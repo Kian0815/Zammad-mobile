@@ -53,12 +53,19 @@ export type QueueOption = {
   label: string;
 };
 
+export type WorkflowMacroOption = {
+  key: string;
+  id: number;
+  label: string;
+};
+
 export type LookupsResponse = {
   states: LookupOption[];
   priorities: LookupOption[];
   owners: OwnerOption[];
   defaultOwnerId: number;
   queues: QueueOption[];
+  workflowMacros: WorkflowMacroOption[];
 };
 
 export type ArticleAttachment = {
