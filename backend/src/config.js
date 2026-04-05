@@ -80,7 +80,9 @@ const config = {
   },
   powerdns: {
     groupId: parseIntValue(process.env.POWERDNS_GROUP_ID, null),
+    groupIds: parseIntList(process.env.POWERDNS_GROUP_IDS),
     groupName: process.env.POWERDNS_GROUP_NAME || 'PowerDNS',
+    organizationIds: parseIntList(process.env.POWERDNS_ORGANIZATION_IDS),
     customerIds: parseIntList(process.env.POWERDNS_CUSTOMER_IDS),
     defaultOwnerId: parseIntValue(process.env.POWERDNS_DEFAULT_OWNER_ID, 214),
     ownerOptions: parseOwnerOptions(process.env.POWERDNS_OWNER_OPTIONS || '214:Antonio Frisina'),
@@ -95,6 +97,18 @@ const config = {
     ticketListLimit: parseIntValue(process.env.TICKET_LIST_LIMIT, 75),
   },
 };
+
+if (config.powerdns.groupIds.length === 0 && Number.isInteger(config.powerdns.groupId)) {
+  config.powerdns.groupIds = [config.powerdns.groupId];
+}
+
+config.powerdns.queueGroups = [
+  { key: 'all', label: 'All PowerDNS Queues', groupIds: config.powerdns.groupIds },
+  { key: 'emea', label: 'PowerDNS EMEA', groupIds: [22] },
+  { key: 'americas', label: 'PowerDNS Americas', groupIds: [23] },
+  { key: 'strategic', label: 'PowerDNS Strategic & Partners', groupIds: [21] },
+  { key: 'centerCells', label: 'PowerDNS Center Cells', groupIds: [35, 36, 40, 42, 48] },
+];
 
 function validateConfig() {
   if (!config.zammad.url) {

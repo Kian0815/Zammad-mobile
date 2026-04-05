@@ -75,6 +75,8 @@ function toViewPayload(ticket) {
     id: ticket.id,
     number: ticket.number,
     title: ticket.title,
+    queue_key: ticket.queue_key,
+    queue_label: ticket.queue_label,
     customer: ticket.customer ? (ticket.customer.fullname || ticket.customer.email || `User #${ticket.customer.id}`) : 'Unknown customer',
     state: ticket.state_name,
     priority: ticket.priority_name,
@@ -88,7 +90,22 @@ function toViewPayload(ticket) {
   };
 }
 
-function buildViews(tickets) {
+function sortTickets(tickets, sortBy = 'updated') {
+  const queueOrder = new Map(config.powerdns.queueGroups.map((queue, index) => [queue.key, index]));
+
+  return [...tickets].sort((left, right) => {
+    if (sortBy === 'queue') {
+      const queueDelta = (queueOrder.get(left.queue_key) ?? 999) - (queueOrder.get(right.queue_key) ?? 999);
+      if (queueDelta !== 0) {
+        return queueDelta;
+      }
+    }
+
+    return new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime();
+  });
+}
+
+function buildViews(tickets, sortBy = 'updated') {
   const waitingCustomerSet = new Set(config.powerdns.waitingCustomerStates);
   const highPriorityNameSet = new Set(config.powerdns.highPriorityNames);
   const highPriorityIdSet = new Set(config.powerdns.highPriorityIds);
@@ -121,9 +138,7 @@ function buildViews(tickets) {
   };
 
   for (const view of Object.values(views)) {
-    view.tickets = view.tickets
-      .sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime())
-      .map(toViewPayload);
+    view.tickets = sortTickets(view.tickets, sortBy).map(toViewPayload);
   }
 
   return views;
@@ -135,6 +150,7 @@ app.get('/health', (_req, res) => {
     env: config.env,
     zammadUrl: config.zammad.url,
     powerdnsGroupId: config.powerdns.groupId,
+    powerdnsGroupIds: config.powerdns.groupIds,
   });
 });
 
@@ -191,11 +207,15 @@ app.get('/api/lookups', requireAuth, async (_req, res, next) => {
 app.get('/api/tickets', requireAuth, async (req, res, next) => {
   try {
     const search = String(req.query.search || '').trim();
-    const tickets = await listPowerDnsTickets(search);
+    const queue = String(req.query.queue || 'all').trim() || 'all';
+    const sortBy = String(req.query.sort || 'updated').trim() || 'updated';
+    const tickets = await listPowerDnsTickets(search, queue);
     return res.json({
       generatedAt: new Date().toISOString(),
       search,
-      views: buildViews(tickets),
+      queue,
+      sort: sortBy,
+      views: buildViews(tickets, sortBy),
     });
   } catch (error) {
     return next(error);

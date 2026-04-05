@@ -4,7 +4,7 @@ import { formatDistanceToNowStrict, formatISO9075 } from 'date-fns';
 import clsx from 'clsx';
 import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { api } from './api';
-import type { LookupsResponse, OwnerOption, Session, TicketCard, TicketDetail, ViewKey } from './types';
+import type { LookupsResponse, OwnerOption, QueueOption, Session, TicketCard, TicketDetail, ViewKey } from './types';
 
 const VIEW_ORDER: ViewKey[] = ['myOpen', 'unassigned', 'waitingCustomer', 'escalated'];
 
@@ -83,7 +83,10 @@ function TicketCardView({ ticket, onClick }: { ticket: TicketCard; onClick: () =
   return (
     <button className="ticket-card" onClick={onClick} type="button">
       <div className="ticket-card-head">
-        <span className="ticket-number">#{ticket.number}</span>
+        <div className="ticket-card-meta">
+          <span className="ticket-number">#{ticket.number}</span>
+          <span className="ticket-queue-pill">{ticket.queue_label}</span>
+        </div>
         <span className="ticket-time">{formatDate(ticket.updated_at)}</span>
       </div>
       <h3>{ticket.title}</h3>
@@ -327,11 +330,18 @@ function DashboardPage({ session, onLogout }: { session: Session; onLogout: () =
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [activeView, setActiveView] = useState<ViewKey>('myOpen');
+  const [activeQueue, setActiveQueue] = useState('all');
+  const [sortBy, setSortBy] = useState<'updated' | 'queue'>('queue');
   const gestureStartX = useRef<number | null>(null);
 
+  const lookupsQuery = useQuery({
+    queryKey: ['lookups'],
+    queryFn: api.lookups,
+  });
+
   const ticketsQuery = useQuery({
-    queryKey: ['tickets', search],
-    queryFn: () => api.listTickets(search),
+    queryKey: ['tickets', search, activeQueue, sortBy],
+    queryFn: () => api.listTickets(search, activeQueue, sortBy),
   });
 
   const views = ticketsQuery.data?.views;
@@ -357,6 +367,25 @@ function DashboardPage({ session, onLogout }: { session: Session; onLogout: () =
             placeholder="Ticket number or subject"
           />
         </label>
+        <div className="filters-row">
+          <label className="field compact-field">
+            <span>Queue</span>
+            <select value={activeQueue} onChange={(event) => setActiveQueue(event.target.value)}>
+              {(lookupsQuery.data?.queues || []).map((queue: QueueOption) => (
+                <option key={queue.key} value={queue.key}>
+                  {queue.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field compact-field">
+            <span>Sort</span>
+            <select value={sortBy} onChange={(event) => setSortBy(event.target.value as 'updated' | 'queue')}>
+              <option value="queue">Queue assignment</option>
+              <option value="updated">Last updated</option>
+            </select>
+          </label>
+        </div>
         <p className="muted">Swipe left or right across the ticket list to switch views.</p>
       </section>
 

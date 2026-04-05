@@ -1,5 +1,6 @@
 .DS_Store
 .env
+.env.proxmox
 logs/
 frontend/dist/
 frontend/node_modules/

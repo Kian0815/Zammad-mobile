@@ -10,6 +10,8 @@ export type TicketCard = {
   id: number;
   number: string;
   title: string;
+  queue_key: string;
+  queue_label: string;
   customer: string;
   state: string;
   priority: string;
@@ -31,6 +33,8 @@ export type TicketView = {
 export type TicketViewsResponse = {
   generatedAt: string;
   search: string;
+  queue: string;
+  sort: string;
   views: Record<ViewKey, TicketView>;
 };
 
@@ -44,11 +48,17 @@ export type OwnerOption = {
   label: string;
 };
 
+export type QueueOption = {
+  key: string;
+  label: string;
+};
+
 export type LookupsResponse = {
   states: LookupOption[];
   priorities: LookupOption[];
   owners: OwnerOption[];
   defaultOwnerId: number;
+  queues: QueueOption[];
 };
 
 export type ArticleAttachment = {

@@ -93,11 +93,35 @@ function priorityMapFrom(priorities) {
   return new Map(priorities.map((priority) => [priority.id, priority]));
 }
 
-function buildTicketSearchQuery(searchTerm) {
-  const fragments = [];
+function queueGroupMap() {
+  return new Map(config.powerdns.queueGroups.map((queue) => [queue.key, queue]));
+}
 
-  if (config.powerdns.groupId) {
-    fragments.push(`group_id:${config.powerdns.groupId}`);
+function resolveActiveGroupIds(queueKey) {
+  const queue = queueGroupMap().get(queueKey || 'all');
+  if (queue && queue.groupIds.length > 0) {
+    return queue.groupIds;
+  }
+
+  return config.powerdns.groupIds;
+}
+
+function queueLabelForGroupId(groupId) {
+  const queue = config.powerdns.queueGroups.find((entry) => entry.key !== 'all' && entry.groupIds.includes(groupId));
+  return queue?.label || config.powerdns.groupName;
+}
+
+function queueKeyForGroupId(groupId) {
+  const queue = config.powerdns.queueGroups.find((entry) => entry.key !== 'all' && entry.groupIds.includes(groupId));
+  return queue?.key || 'all';
+}
+
+function buildTicketSearchQuery(searchTerm, queueKey) {
+  const fragments = [];
+  const activeGroupIds = resolveActiveGroupIds(queueKey);
+
+  if (activeGroupIds.length > 0) {
+    fragments.push(`(${activeGroupIds.map((id) => `group_id:${id}`).join(' OR ')})`);
   }
 
   if (searchTerm) {
@@ -114,9 +138,10 @@ function buildTicketSearchQuery(searchTerm) {
   return fragments.join(' AND ');
 }
 
-async function listPowerDnsTickets(searchTerm = '') {
+async function listPowerDnsTickets(searchTerm = '', queueKey = 'all') {
   const limit = config.powerdns.ticketListLimit;
-  const query = buildTicketSearchQuery(searchTerm);
+  const activeGroupIds = resolveActiveGroupIds(queueKey);
+  const query = buildTicketSearchQuery(searchTerm, queueKey);
 
   let tickets;
   try {
@@ -135,11 +160,19 @@ async function listPowerDnsTickets(searchTerm = '') {
   const filtered = (Array.isArray(tickets) ? tickets : []).filter((ticket) => {
     const stateName = String(statesById.get(ticket.state_id)?.name || '').toLowerCase();
 
-    if (config.powerdns.groupId && ticket.group_id !== config.powerdns.groupId) {
+    if (activeGroupIds.length > 0 && !activeGroupIds.includes(ticket.group_id)) {
       return false;
     }
 
-    if (config.powerdns.customerIds.length > 0 && !config.powerdns.customerIds.includes(ticket.customer_id)) {
+    if (config.powerdns.organizationIds.length > 0 && !config.powerdns.organizationIds.includes(ticket.organization_id)) {
+      return false;
+    }
+
+    if (
+      config.powerdns.organizationIds.length === 0 &&
+      config.powerdns.customerIds.length > 0 &&
+      !config.powerdns.customerIds.includes(ticket.customer_id)
+    ) {
       return false;
     }
 
@@ -160,6 +193,8 @@ async function listPowerDnsTickets(searchTerm = '') {
 
   return filtered.map((ticket) => ({
     ...ticket,
+    queue_key: queueKeyForGroupId(ticket.group_id),
+    queue_label: queueLabelForGroupId(ticket.group_id),
     state_name: statesById.get(ticket.state_id)?.name || `State #${ticket.state_id}`,
     priority_name: prioritiesById.get(ticket.priority_id)?.name || `Priority #${ticket.priority_id}`,
     customer: usersById.get(ticket.customer_id) || null,
@@ -243,6 +278,10 @@ async function getLookups() {
     priorities: priorities.map((priority) => ({ id: priority.id, name: priority.name })),
     owners: config.powerdns.ownerOptions,
     defaultOwnerId: config.powerdns.defaultOwnerId,
+    queues: config.powerdns.queueGroups.map((queue) => ({
+      key: queue.key,
+      label: queue.label,
+    })),
   };
 }
 

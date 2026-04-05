@@ -47,10 +47,14 @@ Important variables:
 - `ZAMMAD_AUTH_MODE`: `token` or `session`
 - `ZAMMAD_TOKEN`: use the same value already used by `auto-recat`
 - `ZAMMAD_SESSION_COOKIE`: optional alternative to token auth
-- `POWERDNS_GROUP_ID`: numeric PowerDNS group ID
+- `POWERDNS_GROUP_ID`: numeric PowerDNS group ID for single-group setups
+- `POWERDNS_GROUP_IDS`: comma-separated PowerDNS group IDs for tenants that split queues across multiple PowerDNS groups
+- `POWERDNS_ORGANIZATION_IDS`: comma-separated PowerDNS organization IDs for B2B queue scoping
 - `POWERDNS_CUSTOMER_IDS`: optional comma-separated customer IDs to keep the queue scoped to PowerDNS customers
 - `POWERDNS_DEFAULT_OWNER_ID`: default owner for “My Open Tickets”; seeded to `214` from `auto-recat`
 - `POWERDNS_OWNER_OPTIONS`: owner choices shown in the UI, example `214:Antonio Frisina,87:Another Agent`
+
+When `POWERDNS_ORGANIZATION_IDS` is set, it takes precedence over `POWERDNS_CUSTOMER_IDS`. This is usually the better fit for shared support organizations.
 
 If your tenant uses different workflow naming, tune:
 

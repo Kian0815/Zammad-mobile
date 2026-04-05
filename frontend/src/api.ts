@@ -37,8 +37,19 @@ export const api = {
   session() {
     return request<Session>('/api/auth/session');
   },
-  listTickets(search = '') {
-    const url = search ? `/api/tickets?search=${encodeURIComponent(search)}` : '/api/tickets';
+  listTickets(search = '', queue = 'all', sort = 'updated') {
+    const params = new URLSearchParams();
+    if (search) {
+      params.set('search', search);
+    }
+    if (queue) {
+      params.set('queue', queue);
+    }
+    if (sort) {
+      params.set('sort', sort);
+    }
+    const query = params.toString();
+    const url = query ? `/api/tickets?${query}` : '/api/tickets';
     return request<TicketViewsResponse>(url);
   },
   ticket(ticketId: number) {
