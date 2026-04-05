@@ -6,10 +6,11 @@ import App from './App';
 import './index.css';
 
 const queryClient = new QueryClient();
+const baseUrl = import.meta.env.BASE_URL;
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((error) => {
+    navigator.serviceWorker.register(`${baseUrl}sw.js`).catch((error) => {
       console.error('Service worker registration failed', error);
     });
   });
@@ -18,7 +19,7 @@ if ('serviceWorker' in navigator) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={baseUrl}>
         <App />
       </BrowserRouter>
     </QueryClientProvider>

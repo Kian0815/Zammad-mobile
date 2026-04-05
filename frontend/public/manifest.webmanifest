@@ -1,14 +1,14 @@
 {
   "name": "PowerDNS Ticket Desk",
   "short_name": "PowerDNS Desk",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#111827",
   "description": "Mobile-first PowerDNS ticket desk for Zammad.",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "./favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

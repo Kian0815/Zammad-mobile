@@ -5,6 +5,8 @@ import type {
   TicketViewsResponse,
 } from './types';
 
+const apiBase = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '');
+
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
     credentials: 'include',
@@ -25,17 +27,17 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 
 export const api = {
   login(username: string, password: string) {
-    return request<Session>('/api/auth/login', {
+    return request<Session>(`${apiBase}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
   },
   logout() {
-    return request<void>('/api/auth/logout', { method: 'POST' });
+    return request<void>(`${apiBase}/auth/logout`, { method: 'POST' });
   },
   session() {
-    return request<Session>('/api/auth/session');
+    return request<Session>(`${apiBase}/auth/session`);
   },
   listTickets(search = '', queue = 'all', sort = 'updated') {
     const params = new URLSearchParams();
@@ -49,24 +51,24 @@ export const api = {
       params.set('sort', sort);
     }
     const query = params.toString();
-    const url = query ? `/api/tickets?${query}` : '/api/tickets';
+    const url = query ? `${apiBase}/tickets?${query}` : `${apiBase}/tickets`;
     return request<TicketViewsResponse>(url);
   },
   ticket(ticketId: number) {
-    return request<TicketDetail>(`/api/tickets/${ticketId}`);
+    return request<TicketDetail>(`${apiBase}/tickets/${ticketId}`);
   },
   lookups() {
-    return request<LookupsResponse>('/api/lookups');
+    return request<LookupsResponse>(`${apiBase}/lookups`);
   },
   updateTicket(ticketId: number, payload: { owner_id?: number; state?: string; priority?: string }) {
-    return request(`/api/tickets/${ticketId}`, {
+    return request(`${apiBase}/tickets/${ticketId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
   },
   addArticle(ticketId: number, formData: FormData) {
-    return request(`/api/tickets/${ticketId}/articles`, {
+    return request(`${apiBase}/tickets/${ticketId}/articles`, {
       method: 'POST',
       body: formData,
     });

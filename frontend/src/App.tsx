@@ -7,6 +7,7 @@ import { api } from './api';
 import type { LookupsResponse, OwnerOption, QueueOption, Session, TicketCard, TicketDetail, ViewKey } from './types';
 
 const VIEW_ORDER: ViewKey[] = ['myOpen', 'unassigned', 'waitingCustomer', 'escalated'];
+const apiBase = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '');
 
 function formatDate(value: string) {
   return `${formatDistanceToNowStrict(new Date(value), { addSuffix: true })} · ${formatISO9075(new Date(value))}`;
@@ -310,7 +311,7 @@ function TicketThread({ ticket }: { ticket: TicketDetail }) {
                   <a
                     key={attachment.id}
                     className="attachment-pill"
-                    href={`/api/tickets/${ticket.id}/attachments/${article.id}/${attachment.id}`}
+                    href={`${apiBase}/tickets/${ticket.id}/attachments/${article.id}/${attachment.id}`}
                     target="_blank"
                     rel="noreferrer"
                   >

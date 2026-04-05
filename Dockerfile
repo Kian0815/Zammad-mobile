@@ -1,5 +1,9 @@
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
+ARG VITE_BASE_PATH=/
+ARG VITE_API_BASE=/api
+ENV VITE_BASE_PATH=${VITE_BASE_PATH}
+ENV VITE_API_BASE=${VITE_API_BASE}
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend ./
