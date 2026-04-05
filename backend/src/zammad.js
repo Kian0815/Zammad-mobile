@@ -1,0 +1,265 @@
+const { config } = require('./config');
+
+const userCache = new Map();
+const stateCache = { fetchedAt: 0, items: [] };
+const priorityCache = { fetchedAt: 0, items: [] };
+
+function authHeaders() {
+  if (config.zammad.authMode === 'session') {
+    return { Cookie: config.zammad.sessionCookie };
+  }
+
+  return {
+    Authorization: `Token token=${config.zammad.token}`,
+  };
+}
+
+async function zammadFetch(path, options = {}) {
+  const response = await fetch(`${config.zammad.url}${path}`, {
+    ...options,
+    headers: {
+      Accept: 'application/json',
+      ...authHeaders(),
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    const error = new Error(`Zammad request failed: ${response.status} ${response.statusText} - ${text}`);
+    error.status = response.status;
+    throw error;
+  }
+
+  return response;
+}
+
+async function zammadJson(path, options = {}) {
+  const response = await zammadFetch(path, options);
+  return response.json();
+}
+
+async function getTicketStates(force = false) {
+  const now = Date.now();
+  if (!force && stateCache.items.length > 0 && now - stateCache.fetchedAt < 10 * 60 * 1000) {
+    return stateCache.items;
+  }
+
+  stateCache.items = await zammadJson('/api/v1/ticket_states');
+  stateCache.fetchedAt = now;
+  return stateCache.items;
+}
+
+async function getTicketPriorities(force = false) {
+  const now = Date.now();
+  if (!force && priorityCache.items.length > 0 && now - priorityCache.fetchedAt < 10 * 60 * 1000) {
+    return priorityCache.items;
+  }
+
+  priorityCache.items = await zammadJson('/api/v1/ticket_priorities');
+  priorityCache.fetchedAt = now;
+  return priorityCache.items;
+}
+
+async function getUserById(userId) {
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return null;
+  }
+
+  if (userCache.has(userId)) {
+    return userCache.get(userId);
+  }
+
+  try {
+    const user = await zammadJson(`/api/v1/users/${userId}`);
+    userCache.set(userId, user);
+    return user;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function getUsersByIds(userIds) {
+  const uniqueIds = [...new Set(userIds.filter((item) => Number.isInteger(item) && item > 0))];
+  const users = await Promise.all(uniqueIds.map((id) => getUserById(id)));
+  return users.filter(Boolean);
+}
+
+function stateMapFrom(states) {
+  return new Map(states.map((state) => [state.id, state]));
+}
+
+function priorityMapFrom(priorities) {
+  return new Map(priorities.map((priority) => [priority.id, priority]));
+}
+
+function buildTicketSearchQuery(searchTerm) {
+  const fragments = [];
+
+  if (config.powerdns.groupId) {
+    fragments.push(`group_id:${config.powerdns.groupId}`);
+  }
+
+  if (searchTerm) {
+    const trimmed = String(searchTerm).trim();
+    const numericSearch = Number.parseInt(trimmed, 10);
+    if (Number.isInteger(numericSearch) && String(numericSearch) === trimmed) {
+      fragments.push(`(number:${numericSearch} OR id:${numericSearch})`);
+    } else {
+      const escaped = trimmed.replace(/"/g, '\\"');
+      fragments.push(`title:"${escaped}"`);
+    }
+  }
+
+  return fragments.join(' AND ');
+}
+
+async function listPowerDnsTickets(searchTerm = '') {
+  const limit = config.powerdns.ticketListLimit;
+  const query = buildTicketSearchQuery(searchTerm);
+
+  let tickets;
+  try {
+    const path = query
+      ? `/api/v1/tickets/search?query=${encodeURIComponent(query)}&limit=${limit}`
+      : `/api/v1/tickets?per_page=${limit}`;
+    tickets = await zammadJson(path);
+  } catch (_error) {
+    tickets = await zammadJson(`/api/v1/tickets?per_page=${limit}`);
+  }
+
+  const [states, priorities] = await Promise.all([getTicketStates(), getTicketPriorities()]);
+  const statesById = stateMapFrom(states);
+  const prioritiesById = priorityMapFrom(priorities);
+
+  const filtered = (Array.isArray(tickets) ? tickets : []).filter((ticket) => {
+    const stateName = String(statesById.get(ticket.state_id)?.name || '').toLowerCase();
+
+    if (config.powerdns.groupId && ticket.group_id !== config.powerdns.groupId) {
+      return false;
+    }
+
+    if (config.powerdns.customerIds.length > 0 && !config.powerdns.customerIds.includes(ticket.customer_id)) {
+      return false;
+    }
+
+    if (searchTerm) {
+      const normalizedSearch = searchTerm.trim().toLowerCase();
+      const matchesNumber = String(ticket.number || '').toLowerCase().includes(normalizedSearch);
+      const matchesTitle = String(ticket.title || '').toLowerCase().includes(normalizedSearch);
+      if (!matchesNumber && !matchesTitle) {
+        return false;
+      }
+    }
+
+    return !config.powerdns.openStateExclusions.includes(stateName);
+  });
+
+  const users = await getUsersByIds(filtered.flatMap((ticket) => [ticket.owner_id, ticket.customer_id]));
+  const usersById = new Map(users.map((user) => [user.id, user]));
+
+  return filtered.map((ticket) => ({
+    ...ticket,
+    state_name: statesById.get(ticket.state_id)?.name || `State #${ticket.state_id}`,
+    priority_name: prioritiesById.get(ticket.priority_id)?.name || `Priority #${ticket.priority_id}`,
+    customer: usersById.get(ticket.customer_id) || null,
+    owner: usersById.get(ticket.owner_id) || null,
+  }));
+}
+
+async function getTicket(ticketId) {
+  const [ticket, articles, states, priorities] = await Promise.all([
+    zammadJson(`/api/v1/tickets/${ticketId}`),
+    zammadJson(`/api/v1/ticket_articles/by_ticket/${ticketId}`),
+    getTicketStates(),
+    getTicketPriorities(),
+  ]);
+
+  const users = await getUsersByIds([
+    ticket.owner_id,
+    ticket.customer_id,
+    ...articles.flatMap((article) => [article.created_by_id, article.updated_by_id, article.origin_by_id]),
+  ]);
+
+  const usersById = new Map(users.map((user) => [user.id, user]));
+  const statesById = stateMapFrom(states);
+  const prioritiesById = priorityMapFrom(priorities);
+
+  return {
+    ...ticket,
+    state_name: statesById.get(ticket.state_id)?.name || `State #${ticket.state_id}`,
+    priority_name: prioritiesById.get(ticket.priority_id)?.name || `Priority #${ticket.priority_id}`,
+    customer: usersById.get(ticket.customer_id) || null,
+    owner: usersById.get(ticket.owner_id) || null,
+    articles: articles.map((article) => ({
+      ...article,
+      created_by_user: usersById.get(article.created_by_id) || null,
+      updated_by_user: usersById.get(article.updated_by_id) || null,
+    })),
+  };
+}
+
+async function updateTicket(ticketId, payload) {
+  return zammadJson(`/api/v1/tickets/${ticketId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+function fileToAttachment(file) {
+  return {
+    filename: file.originalname,
+    data: file.buffer.toString('base64'),
+    'mime-type': file.mimetype || 'application/octet-stream',
+  };
+}
+
+async function addArticle(ticketId, articlePayload, files = []) {
+  const payload = {
+    ...articlePayload,
+    ticket_id: ticketId,
+  };
+
+  if (files.length > 0) {
+    payload.attachments = files.map(fileToAttachment);
+  }
+
+  return zammadJson('/api/v1/ticket_articles', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+async function getLookups() {
+  const [states, priorities] = await Promise.all([getTicketStates(), getTicketPriorities()]);
+  return {
+    states: states.map((state) => ({ id: state.id, name: state.name })),
+    priorities: priorities.map((priority) => ({ id: priority.id, name: priority.name })),
+    owners: config.powerdns.ownerOptions,
+    defaultOwnerId: config.powerdns.defaultOwnerId,
+  };
+}
+
+async function getAttachment(ticketId, articleId, attachmentId, view = 'download') {
+  const response = await zammadFetch(`/api/v1/ticket_attachment/${ticketId}/${articleId}/${attachmentId}?view=${encodeURIComponent(view)}`);
+  const arrayBuffer = await response.arrayBuffer();
+  return {
+    buffer: Buffer.from(arrayBuffer),
+    contentType: response.headers.get('content-type') || 'application/octet-stream',
+  };
+}
+
+module.exports = {
+  addArticle,
+  getAttachment,
+  getLookups,
+  getTicket,
+  listPowerDnsTickets,
+  updateTicket,
+};
