@@ -8,6 +8,7 @@ const morgan = require('morgan');
 const multer = require('multer');
 const { audit } = require('./audit');
 const { config, validateConfig } = require('./config');
+const { getPushConfig, removeSubscription, saveSubscription, startNotificationPolling } = require('./notifications');
 const { addArticle, applyMacro, getAttachment, getLookups, getTicket, listPowerDnsTickets, updateTicket } = require('./zammad');
 
 validateConfig();
@@ -204,6 +205,36 @@ app.get('/api/lookups', requireAuth, async (_req, res, next) => {
   }
 });
 
+app.get('/api/push/config', requireAuth, (_req, res) => {
+  res.json(getPushConfig());
+});
+
+app.post('/api/push/subscribe', requireAuth, (req, res, next) => {
+  try {
+    saveSubscription(req.session.username, req.body?.subscription);
+    audit('push.subscribe', {
+      username: req.session.username,
+      endpoint: req.body?.subscription?.endpoint || null,
+    });
+    res.status(204).end();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
+  const endpoint = String(req.body?.endpoint || '').trim();
+  if (endpoint) {
+    removeSubscription(endpoint);
+    audit('push.unsubscribe', {
+      username: req.session.username,
+      endpoint,
+    });
+  }
+
+  res.status(204).end();
+});
+
 app.get('/api/tickets', requireAuth, async (req, res, next) => {
   try {
     const search = String(req.query.search || '').trim();
@@ -338,4 +369,5 @@ app.use((error, _req, res, _next) => {
 app.listen(config.port, () => {
   fs.mkdirSync(path.dirname(config.auditLogPath), { recursive: true });
   console.log(`Zammad mobile backend listening on http://localhost:${config.port}`);
+  startNotificationPolling();
 });

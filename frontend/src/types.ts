@@ -22,6 +22,7 @@ export type TicketCard = {
   customer_id: number | null;
   state_id: number;
   priority_id: number;
+  is_new?: boolean;
 };
 
 export type TicketView = {
@@ -57,6 +58,11 @@ export type WorkflowMacroOption = {
   key: string;
   id: number;
   label: string;
+};
+
+export type PushConfig = {
+  enabled: boolean;
+  publicKey: string | null;
 };
 
 export type LookupsResponse = {

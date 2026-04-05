@@ -7,6 +7,7 @@ import { api } from './api';
 import type {
   LookupsResponse,
   OwnerOption,
+  PushConfig,
   QueueOption,
   Session,
   TicketCard,
@@ -17,9 +18,115 @@ import type {
 
 const VIEW_ORDER: ViewKey[] = ['myOpen', 'unassigned', 'waitingCustomer', 'escalated'];
 const apiBase = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '');
+const AUTO_REFRESH_MS = 30_000;
 
 function formatDate(value: string) {
   return `${formatDistanceToNowStrict(new Date(value), { addSuffix: true })} · ${formatISO9075(new Date(value))}`;
+}
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
+}
+
+function usePushNotifications() {
+  const [config, setConfig] = useState<PushConfig | null>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [supported, setSupported] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function load() {
+      if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+        if (mounted) {
+          setSupported(false);
+        }
+        return;
+      }
+
+      setSupported(true);
+      const pushConfig = await api.pushConfig().catch(() => null);
+      if (!mounted) {
+        return;
+      }
+
+      setConfig(pushConfig);
+      if (!pushConfig?.enabled) {
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!mounted) {
+        return;
+      }
+
+      setEnabled(Boolean(subscription));
+    }
+
+    load();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  async function toggle() {
+    if (!supported || !config?.enabled) {
+      setMessage('Push notifications are not configured on the server yet.');
+      return;
+    }
+
+    setBusy(true);
+    setMessage('');
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const existingSubscription = await registration.pushManager.getSubscription();
+
+      if (existingSubscription) {
+        await api.unsubscribePush(existingSubscription.endpoint);
+        await existingSubscription.unsubscribe();
+        setEnabled(false);
+        setMessage('Mobile alerts disabled.');
+        return;
+      }
+
+      const permission = Notification.permission === 'granted'
+        ? 'granted'
+        : await Notification.requestPermission();
+
+      if (permission !== 'granted') {
+        setMessage('Notification permission was not granted.');
+        return;
+      }
+
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(config.publicKey || ''),
+      });
+
+      await api.subscribePush(subscription.toJSON());
+      setEnabled(true);
+      setMessage('Mobile alerts enabled.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to update notifications.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return {
+    busy,
+    enabled,
+    message,
+    supported,
+    serverEnabled: Boolean(config?.enabled),
+    toggle,
+  };
 }
 
 function AppHeader({ session, onLogout }: { session: Session; onLogout: () => void }) {
@@ -96,6 +203,7 @@ function TicketCardView({ ticket, onClick }: { ticket: TicketCard; onClick: () =
         <div className="ticket-card-meta">
           <span className="ticket-number">#{ticket.number}</span>
           <span className="ticket-queue-pill">{ticket.queue_label}</span>
+          {ticket.is_new ? <span className="ticket-new-pill">New</span> : null}
         </div>
         <span className="ticket-time">{formatDate(ticket.updated_at)}</span>
       </div>
@@ -119,6 +227,48 @@ function TicketCardView({ ticket, onClick }: { ticket: TicketCard; onClick: () =
         </div>
       </dl>
     </button>
+  );
+}
+
+function PushSettings({
+  busy,
+  enabled,
+  message,
+  serverEnabled,
+  supported,
+  onToggle,
+}: {
+  busy: boolean;
+  enabled: boolean;
+  message: string;
+  serverEnabled: boolean;
+  supported: boolean;
+  onToggle: () => Promise<void>;
+}) {
+  if (!supported) {
+    return (
+      <div className="push-banner">
+        <strong>Mobile alerts unavailable.</strong>
+        <span>Your browser does not support web push from this PWA.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="push-banner">
+      <div>
+        <strong>Mobile alerts</strong>
+        <span>
+          {serverEnabled
+            ? 'New tickets, updates on tickets assigned to you, and escalations.'
+            : 'Push is not configured on the server yet.'}
+        </span>
+      </div>
+      <button className="ghost-button" type="button" onClick={() => onToggle()} disabled={busy || !serverEnabled}>
+        {busy ? 'Updating…' : enabled ? 'Disable alerts' : 'Enable alerts'}
+      </button>
+      {message ? <p className="muted push-message">{message}</p> : null}
+    </div>
   );
 }
 
@@ -363,7 +513,10 @@ function DashboardPage({ session, onLogout }: { session: Session; onLogout: () =
   const [activeView, setActiveView] = useState<ViewKey>('myOpen');
   const [activeQueue, setActiveQueue] = useState('all');
   const [sortBy, setSortBy] = useState<'updated' | 'queue'>('queue');
+  const [newTicketIds, setNewTicketIds] = useState<number[]>([]);
   const gestureStartX = useRef<number | null>(null);
+  const seenTicketIds = useRef<Set<number>>(new Set());
+  const push = usePushNotifications();
 
   const lookupsQuery = useQuery({
     queryKey: ['lookups'],
@@ -373,23 +526,64 @@ function DashboardPage({ session, onLogout }: { session: Session; onLogout: () =
   const ticketsQuery = useQuery({
     queryKey: ['tickets', search, activeQueue, sortBy],
     queryFn: () => api.listTickets(search, activeQueue, sortBy),
+    refetchInterval: AUTO_REFRESH_MS,
+    refetchIntervalInBackground: true,
   });
 
   const views = ticketsQuery.data?.views;
-  const currentTickets = views?.[activeView]?.tickets || [];
+  const newTicketIdSet = useMemo(() => new Set(newTicketIds), [newTicketIds]);
+  const currentTickets = (views?.[activeView]?.tickets || []).map((ticket) => ({
+    ...ticket,
+    is_new: newTicketIdSet.has(ticket.id),
+  }));
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(`zammad-mobile-seen:${activeQueue}`);
+      const parsed = stored ? JSON.parse(stored) : [];
+      seenTicketIds.current = new Set(Array.isArray(parsed) ? parsed : []);
+      setNewTicketIds([]);
+    } catch (_error) {
+      seenTicketIds.current = new Set();
+      setNewTicketIds([]);
+    }
+  }, [activeQueue]);
+
+  useEffect(() => {
+    if (!views) {
+      return;
+    }
+
+    const allTickets = VIEW_ORDER.flatMap((key) => views[key]?.tickets || []);
+    const currentIds = allTickets.map((ticket) => ticket.id);
+    const previousSeen = seenTicketIds.current;
+
+    if (previousSeen.size > 0) {
+      const added = currentIds.filter((ticketId) => !previousSeen.has(ticketId));
+      setNewTicketIds(added);
+    }
+
+    const nextSeen = new Set([...previousSeen, ...currentIds]);
+    seenTicketIds.current = nextSeen;
+    window.localStorage.setItem(`zammad-mobile-seen:${activeQueue}`, JSON.stringify([...nextSeen]));
+  }, [activeQueue, views, ticketsQuery.data?.generatedAt]);
 
   const summary = useMemo(() => {
     if (!views) {
       return [];
     }
 
-    return VIEW_ORDER.map((key) => views[key]);
-  }, [views]);
+    return VIEW_ORDER.map((key) => ({
+      ...views[key],
+      newCount: views[key].tickets.filter((ticket) => newTicketIdSet.has(ticket.id)).length,
+    }));
+  }, [newTicketIdSet, views]);
 
   return (
     <main className="app-shell">
       <AppHeader session={session} onLogout={onLogout} />
       <section className="toolbar">
+        <PushSettings {...push} onToggle={push.toggle} />
         <label className="search-field">
           <span>Search</span>
           <input
@@ -417,7 +611,12 @@ function DashboardPage({ session, onLogout }: { session: Session; onLogout: () =
             </select>
           </label>
         </div>
-        <p className="muted">Swipe left or right across the ticket list to switch views.</p>
+        <div className="toolbar-footer">
+          <p className="muted">Swipe left or right across the ticket list to switch views. Auto-refresh runs every 30s.</p>
+          <button className="ghost-button" type="button" onClick={() => ticketsQuery.refetch()} disabled={ticketsQuery.isFetching}>
+            {ticketsQuery.isFetching ? 'Refreshing…' : 'Refresh now'}
+          </button>
+        </div>
       </section>
 
       <div className="view-tabs">
@@ -430,6 +629,7 @@ function DashboardPage({ session, onLogout }: { session: Session; onLogout: () =
           >
             <span>{view.label}</span>
             <strong>{view.tickets.length}</strong>
+            {view.newCount > 0 ? <small className="tab-new-count">{view.newCount} new</small> : null}
           </button>
         ))}
       </div>
@@ -478,6 +678,8 @@ function TicketDetailPage({ session, onLogout }: { session: Session; onLogout: (
   const detailQuery = useQuery({
     queryKey: ['ticket', ticketId],
     queryFn: () => api.ticket(ticketId),
+    refetchInterval: AUTO_REFRESH_MS,
+    refetchIntervalInBackground: true,
   });
   const lookupsQuery = useQuery({
     queryKey: ['lookups'],

@@ -1,5 +1,6 @@
 import type {
   LookupsResponse,
+  PushConfig,
   Session,
   TicketDetail,
   TicketViewsResponse,
@@ -59,6 +60,23 @@ export const api = {
   },
   lookups() {
     return request<LookupsResponse>(`${apiBase}/lookups`);
+  },
+  pushConfig() {
+    return request<PushConfig>(`${apiBase}/push/config`);
+  },
+  subscribePush(subscription: PushSubscriptionJSON) {
+    return request<void>(`${apiBase}/push/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription }),
+    });
+  },
+  unsubscribePush(endpoint: string) {
+    return request<void>(`${apiBase}/push/unsubscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint }),
+    });
   },
   updateTicket(ticketId: number, payload: { owner_id?: number; state?: string; priority?: string }) {
     return request(`${apiBase}/tickets/${ticketId}`, {

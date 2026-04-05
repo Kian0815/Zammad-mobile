@@ -80,6 +80,15 @@ function parseMacroOptions(value, fallback = '') {
     .filter(Boolean);
 }
 
+function normalizeUrl(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+}
+
 const config = {
   env: process.env.NODE_ENV || 'development',
   port: parseIntValue(process.env.PORT, 3001),
@@ -91,6 +100,7 @@ const config = {
   readOnlyMode: parseBoolean(process.env.READ_ONLY_MODE, true),
   auditLogPath: path.resolve(rootDir, process.env.AUDIT_LOG_PATH || 'logs/audit.log'),
   frontendDistPath: path.resolve(rootDir, 'frontend', 'dist'),
+  publicAppUrl: normalizeUrl(process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || `http://localhost:${parseIntValue(process.env.PORT, 3001)}/`),
   zammad: {
     url: String(process.env.ZAMMAD_URL || '').replace(/\/+$/, ''),
     authMode: (process.env.ZAMMAD_AUTH_MODE || 'token').trim().toLowerCase(),
@@ -118,6 +128,16 @@ const config = {
     openStateExclusions: parseCsv(process.env.OPEN_STATE_EXCLUSIONS || 'closed,merged,removed')
       .map((state) => state.toLowerCase()),
     ticketListLimit: parseIntValue(process.env.TICKET_LIST_LIMIT, 75),
+  },
+  notifications: {
+    pollSeconds: parseIntValue(process.env.NOTIFICATION_POLL_SECONDS, 30),
+    statePath: path.resolve(rootDir, process.env.NOTIFICATION_STATE_PATH || 'logs/notification-state.json'),
+  },
+  push: {
+    subject: String(process.env.VAPID_SUBJECT || '').trim(),
+    publicKey: String(process.env.VAPID_PUBLIC_KEY || '').trim(),
+    privateKey: String(process.env.VAPID_PRIVATE_KEY || '').trim(),
+    subscriptionStorePath: path.resolve(rootDir, process.env.PUSH_SUBSCRIPTIONS_PATH || 'logs/push-subscriptions.json'),
   },
 };
 
