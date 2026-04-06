@@ -156,51 +156,50 @@ function deriveEvents(currentTickets, previousTickets, deliveredEventKeys) {
 
   for (const ticket of currentTickets) {
     const previous = previousTickets[ticket.id];
+    const candidates = [];
 
     if (!previous) {
-      const eventKey = `new:${ticket.id}:${ticket.updated_at}`;
-      if (!delivered.has(eventKey)) {
-        events.push({
-          eventKey,
-          title: `New PowerDNS ticket #${ticket.number}`,
-          body: ticket.title,
-          tag: `ticket-new-${ticket.id}`,
+      candidates.push({
+        eventKey: `new:${ticket.id}:${ticket.updated_at}`,
+        title: `New PowerDNS ticket #${ticket.number}`,
+        body: ticket.title,
+        tag: `ticket-new-${ticket.id}`,
+        url: buildNotificationUrl(ticket.id),
+      });
+    } else {
+      if (isEscalated(ticket) && !isEscalated(previous)) {
+        candidates.push({
+          eventKey: `escalated:${ticket.id}:${ticket.updated_at}`,
+          title: `Escalated or high priority #${ticket.number}`,
+          body: `${ticket.priority_name} · ${ticket.title}`,
+          tag: `ticket-escalated-${ticket.id}`,
           url: buildNotificationUrl(ticket.id),
         });
       }
-    }
 
-    if (isInStateSet(ticket, newStateSet) && (!previous || !isInStateSet(previous, newStateSet))) {
-      const eventKey = `state-new:${ticket.id}:${ticket.updated_at}`;
-      if (!delivered.has(eventKey)) {
-        events.push({
-          eventKey,
+      if (isInStateSet(ticket, newStateSet) && !isInStateSet(previous, newStateSet)) {
+        candidates.push({
+          eventKey: `state-new:${ticket.id}:${ticket.updated_at}`,
           title: `Ticket is new #${ticket.number}`,
           body: ticket.title,
           tag: `ticket-state-new-${ticket.id}`,
           url: buildNotificationUrl(ticket.id),
         });
       }
-    }
 
-    if (previous && isInStateSet(ticket, openStateSet) && !isInStateSet(previous, openStateSet)) {
-      const eventKey = `state-open:${ticket.id}:${ticket.updated_at}`;
-      if (!delivered.has(eventKey)) {
-        events.push({
-          eventKey,
+      if (isInStateSet(ticket, openStateSet) && !isInStateSet(previous, openStateSet)) {
+        candidates.push({
+          eventKey: `state-open:${ticket.id}:${ticket.updated_at}`,
           title: `Ticket is open #${ticket.number}`,
           body: ticket.title,
           tag: `ticket-state-open-${ticket.id}`,
           url: buildNotificationUrl(ticket.id),
         });
       }
-    }
 
-    if (previous && previous.updated_at !== ticket.updated_at && ticket.owner_id === config.powerdns.defaultOwnerId) {
-      const eventKey = `assigned-update:${ticket.id}:${ticket.updated_at}`;
-      if (!delivered.has(eventKey)) {
-        events.push({
-          eventKey,
+      if (previous.updated_at !== ticket.updated_at && ticket.owner_id === config.powerdns.defaultOwnerId) {
+        candidates.push({
+          eventKey: `assigned-update:${ticket.id}:${ticket.updated_at}`,
           title: `Assigned ticket updated #${ticket.number}`,
           body: ticket.title,
           tag: `ticket-update-${ticket.id}`,
@@ -209,17 +208,9 @@ function deriveEvents(currentTickets, previousTickets, deliveredEventKeys) {
       }
     }
 
-    if (isEscalated(ticket) && (!previous || !isEscalated(previous))) {
-      const eventKey = `escalated:${ticket.id}:${ticket.updated_at}`;
-      if (!delivered.has(eventKey)) {
-        events.push({
-          eventKey,
-          title: `Escalated or high priority #${ticket.number}`,
-          body: `${ticket.priority_name} · ${ticket.title}`,
-          tag: `ticket-escalated-${ticket.id}`,
-          url: buildNotificationUrl(ticket.id),
-        });
-      }
+    const selected = candidates.find((candidate) => !delivered.has(candidate.eventKey));
+    if (selected) {
+      events.push(selected);
     }
   }
 
