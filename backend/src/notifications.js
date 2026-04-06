@@ -79,6 +79,10 @@ function isEscalated(ticket) {
   return Boolean(ticket.escalation_at) || highPriorityNameSet.has(priorityName) || highPriorityIdSet.has(ticket.priority_id);
 }
 
+function isInStateSet(ticket, stateNames) {
+  return stateNames.has(String(ticket.state_name || '').toLowerCase());
+}
+
 function snapshotTicket(ticket) {
   return {
     id: ticket.id,
@@ -146,6 +150,8 @@ async function sendNotificationToAll(payload, eventKey) {
 
 function deriveEvents(currentTickets, previousTickets, deliveredEventKeys) {
   const delivered = new Set(deliveredEventKeys);
+  const newStateSet = new Set(config.powerdns.newTicketStates);
+  const openStateSet = new Set(config.powerdns.openTicketStates);
   const events = [];
 
   for (const ticket of currentTickets) {
@@ -159,6 +165,32 @@ function deriveEvents(currentTickets, previousTickets, deliveredEventKeys) {
           title: `New PowerDNS ticket #${ticket.number}`,
           body: ticket.title,
           tag: `ticket-new-${ticket.id}`,
+          url: buildNotificationUrl(ticket.id),
+        });
+      }
+    }
+
+    if (isInStateSet(ticket, newStateSet) && (!previous || !isInStateSet(previous, newStateSet))) {
+      const eventKey = `state-new:${ticket.id}:${ticket.updated_at}`;
+      if (!delivered.has(eventKey)) {
+        events.push({
+          eventKey,
+          title: `Ticket is new #${ticket.number}`,
+          body: ticket.title,
+          tag: `ticket-state-new-${ticket.id}`,
+          url: buildNotificationUrl(ticket.id),
+        });
+      }
+    }
+
+    if (previous && isInStateSet(ticket, openStateSet) && !isInStateSet(previous, openStateSet)) {
+      const eventKey = `state-open:${ticket.id}:${ticket.updated_at}`;
+      if (!delivered.has(eventKey)) {
+        events.push({
+          eventKey,
+          title: `Ticket is open #${ticket.number}`,
+          body: ticket.title,
+          tag: `ticket-state-open-${ticket.id}`,
           url: buildNotificationUrl(ticket.id),
         });
       }

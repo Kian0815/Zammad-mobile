@@ -120,6 +120,10 @@ const config = {
       'waitingCustomer:2:Waiting for customer +7d,processing:18:Processing +7d,pendingAutoclose3:16:Pending autoclose +3d',
     ),
     unassignedOwnerIds: parseIntList(process.env.UNASSIGNED_OWNER_IDS || '1'),
+    newTicketStates: parseCsv(process.env.NEW_TICKET_STATE_NAMES || 'new')
+      .map((state) => state.toLowerCase()),
+    openTicketStates: parseCsv(process.env.OPEN_TICKET_STATE_NAMES || 'open')
+      .map((state) => state.toLowerCase()),
     waitingCustomerStates: parseCsv(process.env.WAITING_CUSTOMER_STATE_NAMES || 'waiting for customer,pending reminder,pending action')
       .map((state) => state.toLowerCase()),
     highPriorityNames: parseCsv(process.env.HIGH_PRIORITY_NAMES || '3 high,4 urgent')

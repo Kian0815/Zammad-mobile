@@ -1,4 +1,4 @@
-export type ViewKey = 'myOpen' | 'unassigned' | 'waitingCustomer' | 'escalated';
+export type ViewKey = 'newTickets' | 'openTickets' | 'myOpen' | 'unassigned' | 'waitingCustomer' | 'escalated';
 
 export type Session = {
   username: string;

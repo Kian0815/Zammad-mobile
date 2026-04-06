@@ -107,12 +107,24 @@ function sortTickets(tickets, sortBy = 'updated') {
 }
 
 function buildViews(tickets, sortBy = 'updated') {
+  const newTicketSet = new Set(config.powerdns.newTicketStates);
+  const openTicketSet = new Set(config.powerdns.openTicketStates);
   const waitingCustomerSet = new Set(config.powerdns.waitingCustomerStates);
   const highPriorityNameSet = new Set(config.powerdns.highPriorityNames);
   const highPriorityIdSet = new Set(config.powerdns.highPriorityIds);
   const unassignedSet = new Set(config.powerdns.unassignedOwnerIds);
 
   const views = {
+    newTickets: {
+      key: 'newTickets',
+      label: 'New Tickets',
+      tickets: tickets.filter((ticket) => newTicketSet.has(String(ticket.state_name || '').toLowerCase())),
+    },
+    openTickets: {
+      key: 'openTickets',
+      label: 'Open Tickets',
+      tickets: tickets.filter((ticket) => openTicketSet.has(String(ticket.state_name || '').toLowerCase())),
+    },
     myOpen: {
       key: 'myOpen',
       label: 'My Open Tickets',

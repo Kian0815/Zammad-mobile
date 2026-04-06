@@ -16,7 +16,7 @@ import type {
   WorkflowMacroOption,
 } from './types';
 
-const VIEW_ORDER: ViewKey[] = ['myOpen', 'unassigned', 'waitingCustomer', 'escalated'];
+const VIEW_ORDER: ViewKey[] = ['newTickets', 'openTickets', 'myOpen', 'unassigned', 'waitingCustomer', 'escalated'];
 const apiBase = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '');
 const AUTO_REFRESH_MS = 30_000;
 
@@ -510,7 +510,7 @@ function TicketThread({ ticket }: { ticket: TicketDetail }) {
 function DashboardPage({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const [activeView, setActiveView] = useState<ViewKey>('myOpen');
+  const [activeView, setActiveView] = useState<ViewKey>('newTickets');
   const [activeQueue, setActiveQueue] = useState('all');
   const [sortBy, setSortBy] = useState<'updated' | 'queue'>('queue');
   const [newTicketIds, setNewTicketIds] = useState<number[]>([]);
