@@ -415,6 +415,7 @@ textarea:disabled {
 
 .timeline-item {
   padding: 1rem;
+  position: relative;
 }
 
 .timeline-item-external {
@@ -433,6 +434,22 @@ textarea:disabled {
 .article-body {
   color: var(--text-body);
   line-height: 1.6;
+}
+
+.timeline-item-compressed .article-body {
+  max-height: 14rem;
+  overflow: hidden;
+  mask-image: linear-gradient(180deg, #000 68%, transparent 100%);
+}
+
+.show-more-button {
+  margin-top: 0.55rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #60a5fa;
+  cursor: pointer;
+  font-weight: 700;
 }
 
 .attachments {

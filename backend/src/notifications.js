@@ -265,7 +265,7 @@ function startNotificationPolling() {
   pollingStarted = true;
   setTimeout(() => {
     pollNotifications();
-    setInterval(pollNotifications, Math.max(config.notifications.pollSeconds, 15) * 1000);
+    setInterval(pollNotifications, Math.max(config.notifications.pollSeconds, 5) * 1000);
   }, 5_000);
 }
 

@@ -1,3 +1,7 @@
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
 const fs = require('node:fs');
 const path = require('node:path');
 const dotenv = require('dotenv');
@@ -89,6 +93,18 @@ function normalizeUrl(value) {
   return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
 }
 
+const defaultPowerDnsQueueGroups = [
+  { key: 'emea', label: 'PowerDNS EMEA', groupIds: [22] },
+  { key: 'strategic', label: 'PowerDNS Strategic & Partners', groupIds: [21] },
+  { key: 'americas', label: 'PowerDNS Americas', groupIds: [23] },
+  { key: 'centerCells', label: 'PowerDNS Center Cells', groupIds: [35, 36, 40, 42, 48] },
+  { key: 'supportGlobal', label: 'Support Global PDNS', groupIds: [53] },
+];
+
+function uniqueIntList(values) {
+  return [...new Set(values.filter((item) => Number.isInteger(item)))];
+}
+
 const config = {
   env: process.env.NODE_ENV || 'development',
   port: parseIntValue(process.env.PORT, 3001),
@@ -134,7 +150,7 @@ const config = {
     ticketListLimit: parseIntValue(process.env.TICKET_LIST_LIMIT, 75),
   },
   notifications: {
-    pollSeconds: parseIntValue(process.env.NOTIFICATION_POLL_SECONDS, 30),
+    pollSeconds: parseIntValue(process.env.NOTIFICATION_POLL_SECONDS, 10),
     statePath: path.resolve(rootDir, process.env.NOTIFICATION_STATE_PATH || 'logs/notification-state.json'),
   },
   push: {
@@ -149,12 +165,20 @@ if (config.powerdns.groupIds.length === 0 && Number.isInteger(config.powerdns.gr
   config.powerdns.groupIds = [config.powerdns.groupId];
 }
 
+if (config.powerdns.groupIds.length === 0) {
+  config.powerdns.groupIds = uniqueIntList(defaultPowerDnsQueueGroups.flatMap((queue) => queue.groupIds));
+}
+
 config.powerdns.queueGroups = [
-  { key: 'all', label: 'All PowerDNS Queues', groupIds: config.powerdns.groupIds },
-  { key: 'emea', label: 'PowerDNS EMEA', groupIds: [22] },
-  { key: 'americas', label: 'PowerDNS Americas', groupIds: [23] },
-  { key: 'strategic', label: 'PowerDNS Strategic & Partners', groupIds: [21] },
-  { key: 'centerCells', label: 'PowerDNS Center Cells', groupIds: [35, 36, 40, 42, 48] },
+  {
+    key: 'all',
+    label: 'All PowerDNS Queues',
+    groupIds: uniqueIntList([
+      ...config.powerdns.groupIds,
+      ...defaultPowerDnsQueueGroups.flatMap((queue) => queue.groupIds),
+    ]),
+  },
+  ...defaultPowerDnsQueueGroups,
 ];
 
 function validateConfig() {
@@ -175,3 +199,46 @@ module.exports = {
   config,
   validateConfig,
 };
+=======
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+import dotenv from 'dotenv';
+
+dotenv.config({ path: process.env.DOTENV_CONFIG_PATH || '../.env' });
+
+export const config = {
+  port: Number(process.env.BACKEND_PORT || 4000),
+  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  sessionSecret: process.env.SESSION_SECRET || 'change-me',
+  zammadUrl: (process.env.ZAMMAD_URL || '').replace(/\/$/, ''),
+  zammadToken: process.env.ZAMMAD_API_TOKEN || '',
+  zammadAuthMode: process.env.ZAMMAD_AUTH_MODE || 'token',
+  powerdnsGroupName: process.env.POWERDNS_GROUP_NAME || 'PowerDNS',
+  proxyUsername: process.env.PROXY_USERNAME || '',
+  proxyPassword: process.env.PROXY_PASSWORD || '',
+  auditLogPath: process.env.AUDIT_LOG_PATH || './audit.log'
+};
+
+export function ensureConfig() {
+  if (!config.zammadUrl) throw new Error('ZAMMAD_URL is required');
+  if (config.zammadAuthMode === 'token' && !config.zammadToken) {
+    throw new Error('ZAMMAD_API_TOKEN is required for token auth mode');
+  }
+  if (config.zammadAuthMode === 'token' && (!config.proxyUsername || !config.proxyPassword)) {
+    throw new Error('PROXY_USERNAME and PROXY_PASSWORD are required for token auth mode');
+  }
+}
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs

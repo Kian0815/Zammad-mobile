@@ -3,6 +3,7 @@ const { config } = require('./config');
 const userCache = new Map();
 const stateCache = { fetchedAt: 0, items: [] };
 const priorityCache = { fetchedAt: 0, items: [] };
+const macroCache = { fetchedAt: 0, items: [] };
 
 function authHeaders() {
   if (config.zammad.authMode === 'session') {
@@ -59,6 +60,69 @@ async function getTicketPriorities(force = false) {
   priorityCache.items = await zammadJson('/api/v1/ticket_priorities');
   priorityCache.fetchedAt = now;
   return priorityCache.items;
+}
+
+function configuredWorkflowMacros() {
+  return config.powerdns.workflowMacros.map((macro) => ({
+    key: macro.key,
+    id: macro.id,
+    label: macro.label,
+  }));
+}
+
+function macroGroupIds(macro) {
+  if (Array.isArray(macro.group_ids)) {
+    return macro.group_ids;
+  }
+
+  if (macro.group_ids && typeof macro.group_ids === 'object') {
+    return Object.keys(macro.group_ids)
+      .map((id) => Number.parseInt(id, 10))
+      .filter(Number.isInteger);
+  }
+
+  return [];
+}
+
+function configuredPowerDnsGroupIds() {
+  return [
+    ...new Set(config.powerdns.queueGroups.flatMap((queue) => queue.groupIds)),
+  ];
+}
+
+function visibleWorkflowMacro(macro) {
+  if (!macro || macro.active === false || !Number.isInteger(macro.id) || !macro.name) {
+    return false;
+  }
+
+  const groupIds = macroGroupIds(macro);
+  const powerDnsGroupIds = configuredPowerDnsGroupIds();
+  return groupIds.length === 0 || groupIds.some((groupId) => powerDnsGroupIds.includes(groupId));
+}
+
+async function getWorkflowMacros(force = false) {
+  const now = Date.now();
+  if (!force && macroCache.items.length > 0 && now - macroCache.fetchedAt < 10 * 60 * 1000) {
+    return macroCache.items;
+  }
+
+  try {
+    const macros = await zammadJson('/api/v1/macros?per_page=200');
+    macroCache.items = (Array.isArray(macros) ? macros : [])
+      .filter(visibleWorkflowMacro)
+      .map((macro) => ({
+        key: `zammad-${macro.id}`,
+        id: macro.id,
+        label: macro.name,
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label));
+    macroCache.fetchedAt = now;
+  } catch (_error) {
+    macroCache.items = configuredWorkflowMacros();
+    macroCache.fetchedAt = now;
+  }
+
+  return macroCache.items;
 }
 
 async function getUserById(userId) {
@@ -124,6 +188,12 @@ function buildTicketSearchQuery(searchTerm, queueKey) {
     fragments.push(`(${activeGroupIds.map((id) => `group_id:${id}`).join(' OR ')})`);
   }
 
+  if (config.powerdns.organizationIds.length > 0) {
+    fragments.push(`(${config.powerdns.organizationIds.map((id) => `organization_id:${id}`).join(' OR ')})`);
+  } else if (config.powerdns.customerIds.length > 0) {
+    fragments.push(`(${config.powerdns.customerIds.map((id) => `customer_id:${id}`).join(' OR ')})`);
+  }
+
   if (searchTerm) {
     const trimmed = String(searchTerm).trim();
     const numericSearch = Number.parseInt(trimmed, 10);
@@ -145,8 +215,8 @@ async function listPowerDnsTickets(searchTerm = '', queueKey = 'all') {
 
   let tickets;
   try {
-    const path = query
-      ? `/api/v1/tickets/search?query=${encodeURIComponent(query)}&limit=${limit}`
+    const path = query || activeGroupIds.length > 0
+      ? `/api/v1/tickets/search?query=${encodeURIComponent(query)}&limit=${limit}&sort_by=updated_at&order_by=desc`
       : `/api/v1/tickets?per_page=${limit}`;
     tickets = await zammadJson(path);
   } catch (_error) {
@@ -226,11 +296,13 @@ async function getTicket(ticketId) {
     priority_name: prioritiesById.get(ticket.priority_id)?.name || `Priority #${ticket.priority_id}`,
     customer: usersById.get(ticket.customer_id) || null,
     owner: usersById.get(ticket.owner_id) || null,
-    articles: articles.map((article) => ({
-      ...article,
-      created_by_user: usersById.get(article.created_by_id) || null,
-      updated_by_user: usersById.get(article.updated_by_id) || null,
-    })),
+    articles: [...articles]
+      .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+      .map((article) => ({
+        ...article,
+        created_by_user: usersById.get(article.created_by_id) || null,
+        updated_by_user: usersById.get(article.updated_by_id) || null,
+      })),
   };
 }
 
@@ -351,7 +423,7 @@ async function addArticle(ticketId, articlePayload, files = []) {
 }
 
 async function getLookups() {
-  const [states, priorities] = await Promise.all([getTicketStates(), getTicketPriorities()]);
+  const [states, priorities, workflowMacros] = await Promise.all([getTicketStates(), getTicketPriorities(), getWorkflowMacros()]);
   return {
     states: states.map((state) => ({ id: state.id, name: state.name })),
     priorities: priorities.map((priority) => ({ id: priority.id, name: priority.name })),
@@ -361,7 +433,7 @@ async function getLookups() {
       key: queue.key,
       label: queue.label,
     })),
-    workflowMacros: config.powerdns.workflowMacros,
+    workflowMacros,
   };
 }
 
@@ -380,6 +452,7 @@ module.exports = {
   getAttachment,
   getLookups,
   getTicket,
+  getWorkflowMacros,
   listPowerDnsTickets,
   updateTicket,
 };

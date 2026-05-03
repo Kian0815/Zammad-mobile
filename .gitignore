@@ -1,3 +1,7 @@
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
 .DS_Store
 .env
 .env.proxmox
@@ -6,3 +10,26 @@ frontend/dist/
 frontend/node_modules/
 backend/node_modules/
 *.log
+=======
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+node_modules
+.env
+*.log
+frontend/dist
+backend/uploads
+.DS_Store
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs

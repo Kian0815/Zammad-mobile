@@ -18,7 +18,11 @@ import type {
 
 const VIEW_ORDER: ViewKey[] = ['newTickets', 'openTickets', 'myOpen', 'unassigned', 'waitingCustomer', 'escalated'];
 const apiBase = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '');
-const AUTO_REFRESH_MS = 30_000;
+const AUTO_REFRESH_SECONDS = Math.max(Number(import.meta.env.VITE_AUTO_REFRESH_SECONDS || 10), 5);
+const AUTO_REFRESH_MS = AUTO_REFRESH_SECONDS * 1000;
+const AUTO_REFRESH_LABEL = AUTO_REFRESH_SECONDS % 60 === 0
+  ? `${AUTO_REFRESH_SECONDS / 60}m`
+  : `${AUTO_REFRESH_SECONDS}s`;
 
 function formatDate(value: string) {
   return `${formatDistanceToNowStrict(new Date(value), { addSuffix: true })} · ${formatISO9075(new Date(value))}`;
@@ -292,6 +296,7 @@ function TicketComposer({
   const [files, setFiles] = useState<FileList | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSubject(ticket.title);
     setOwnerId(String(ticket.owner_id || lookups.defaultOwnerId));
     setState(ticket.state_name);
@@ -396,7 +401,7 @@ function TicketComposer({
         </label>
 
         <label className="field">
-          <span>Next status via macro</span>
+          <span>Zammad macro</span>
           <select value={workflowMacro} onChange={(event) => setWorkflowMacro(event.target.value)} disabled={readOnlyMode}>
             <option value="">No macro</option>
             {lookups.workflowMacros.map((entry: WorkflowMacroOption) => (
@@ -443,6 +448,11 @@ function TicketComposer({
 }
 
 function TicketThread({ ticket }: { ticket: TicketDetail }) {
+  const sortedArticles = useMemo(
+    () => [...ticket.articles].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
+    [ticket.articles],
+  );
+
   return (
     <section className="thread">
       <div className="detail-card">
@@ -473,37 +483,68 @@ function TicketThread({ ticket }: { ticket: TicketDetail }) {
       </div>
 
       <div className="timeline">
-        {ticket.articles.map((article) => (
-          <article
+        {sortedArticles.map((article, index) => (
+          <TicketArticleView
             key={article.id}
-            className={clsx('timeline-item', article.internal ? 'timeline-item-internal' : 'timeline-item-external')}
-          >
-            <div className="timeline-meta">
-              <span>{article.internal ? 'Internal note' : 'Customer-visible reply'}</span>
-              <span>{article.created_by_user?.fullname || article.created_by_user?.email || article.created_by}</span>
-              <span>{formatDate(article.created_at)}</span>
-            </div>
-            <h3>{article.subject || article.type}</h3>
-            <div className="article-body" dangerouslySetInnerHTML={{ __html: article.body }} />
-            {article.attachments.length > 0 ? (
-              <div className="attachments">
-                {article.attachments.map((attachment) => (
-                  <a
-                    key={attachment.id}
-                    className="attachment-pill"
-                    href={`${apiBase}/tickets/${ticket.id}/attachments/${article.id}/${attachment.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {attachment.filename}
-                  </a>
-                ))}
-              </div>
-            ) : null}
-          </article>
+            article={article}
+            defaultExpanded={index === 0}
+            ticketId={ticket.id}
+          />
         ))}
       </div>
     </section>
+  );
+}
+
+function TicketArticleView({
+  article,
+  defaultExpanded,
+  ticketId,
+}: {
+  article: TicketDetail['articles'][number];
+  defaultExpanded: boolean;
+  ticketId: number;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const plainBodyLength = article.body.replace(/<[^>]*>/g, '').trim().length;
+  const shouldCompress = !expanded && plainBodyLength > 420;
+
+  return (
+    <article
+      className={clsx(
+        'timeline-item',
+        article.internal ? 'timeline-item-internal' : 'timeline-item-external',
+        shouldCompress && 'timeline-item-compressed',
+      )}
+    >
+      <div className="timeline-meta">
+        <span>{article.internal ? 'Internal note' : 'Customer-visible reply'}</span>
+        <span>{article.created_by_user?.fullname || article.created_by_user?.email || article.created_by}</span>
+        <span>{formatDate(article.created_at)}</span>
+      </div>
+      <h3>{article.subject || article.type}</h3>
+      <div className="article-body" dangerouslySetInnerHTML={{ __html: article.body }} />
+      {shouldCompress ? (
+        <button className="show-more-button" type="button" onClick={() => setExpanded(true)}>
+          Show more
+        </button>
+      ) : null}
+      {article.attachments.length > 0 ? (
+        <div className="attachments">
+          {article.attachments.map((attachment) => (
+            <a
+              key={attachment.id}
+              className="attachment-pill"
+              href={`${apiBase}/tickets/${ticketId}/attachments/${article.id}/${attachment.id}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {attachment.filename}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </article>
   );
 }
 
@@ -542,8 +583,9 @@ function DashboardPage({ session, onLogout }: { session: Session; onLogout: () =
       const stored = window.localStorage.getItem(`zammad-mobile-seen:${activeQueue}`);
       const parsed = stored ? JSON.parse(stored) : [];
       seenTicketIds.current = new Set(Array.isArray(parsed) ? parsed : []);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setNewTicketIds([]);
-    } catch (_error) {
+    } catch {
       seenTicketIds.current = new Set();
       setNewTicketIds([]);
     }
@@ -612,7 +654,7 @@ function DashboardPage({ session, onLogout }: { session: Session; onLogout: () =
           </label>
         </div>
         <div className="toolbar-footer">
-          <p className="muted">Swipe left or right across the ticket list to switch views. Auto-refresh runs every 30s.</p>
+          <p className="muted">Swipe left or right across the ticket list to switch views. Auto-refresh runs every {AUTO_REFRESH_LABEL}.</p>
           <button className="ghost-button" type="button" onClick={() => ticketsQuery.refetch()} disabled={ticketsQuery.isFetching}>
             {ticketsQuery.isFetching ? 'Refreshing…' : 'Refresh now'}
           </button>

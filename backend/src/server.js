@@ -1,3 +1,7 @@
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,7 +13,7 @@ const multer = require('multer');
 const { audit } = require('./audit');
 const { config, validateConfig } = require('./config');
 const { getPushConfig, removeSubscription, saveSubscription, startNotificationPolling } = require('./notifications');
-const { addArticle, applyMacro, getAttachment, getLookups, getTicket, listPowerDnsTickets, updateTicket } = require('./zammad');
+const { addArticle, applyMacro, getAttachment, getLookups, getTicket, getWorkflowMacros, listPowerDnsTickets, updateTicket } = require('./zammad');
 
 validateConfig();
 
@@ -327,7 +331,8 @@ app.post('/api/tickets/:ticketId/macro', requireAuth, requireWritable, async (re
   try {
     const ticketId = Number.parseInt(req.params.ticketId, 10);
     const macroKey = String(req.body?.macroKey || '').trim();
-    const macro = config.powerdns.workflowMacros.find((entry) => entry.key === macroKey);
+    const workflowMacros = await getWorkflowMacros();
+    const macro = workflowMacros.find((entry) => entry.key === macroKey);
 
     if (!macro) {
       return res.status(400).json({ error: 'Unknown workflow macro.' });
@@ -382,4 +387,200 @@ app.listen(config.port, () => {
   fs.mkdirSync(path.dirname(config.auditLogPath), { recursive: true });
   console.log(`Zammad mobile backend listening on http://localhost:${config.port}`);
   startNotificationPolling();
+=======
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import session from 'express-session';
+import morgan from 'morgan';
+import multer from 'multer';
+import { config, ensureConfig } from './config.js';
+import { auditLog } from './audit.js';
+import {
+  buildTicketQuery,
+  findPowerdnsGroupId,
+  mapTicket,
+  zammadGet,
+  zammadPost,
+  zammadPut,
+  zammadSignin
+} from './zammadClient.js';
+
+ensureConfig();
+
+const upload = multer();
+const app = express();
+
+app.use(helmet());
+app.use(cors({ origin: config.frontendUrl, credentials: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(morgan('tiny'));
+app.use(
+  session({
+    secret: config.sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }
+  })
+);
+
+function requireAuth(req, res, next) {
+  if (!req.session.user) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+}
+
+async function fetchMeta(sessionData) {
+  const [users, states, priorities] = await Promise.all([
+    zammadGet('/users/search?query=*', sessionData),
+    zammadGet('/ticket_states', sessionData),
+    zammadGet('/ticket_priorities', sessionData)
+  ]);
+
+  return {
+    users: Object.fromEntries(users.map((u) => [u.id, u])),
+    states: Object.fromEntries(states.map((s) => [s.id, s])),
+    priorities: Object.fromEntries(priorities.map((p) => [p.id, p])),
+    usersList: users,
+    statesList: states,
+    prioritiesList: priorities
+  };
+}
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (config.zammadAuthMode === 'token') {
+      if (username !== config.proxyUsername || password !== config.proxyPassword) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      req.session.user = { id: 0, fullname: username };
+      req.session.zammad = null;
+    } else {
+      const signin = await zammadSignin(username, password);
+      req.session.user = signin.profile;
+      req.session.zammad = { zammadCookie: signin.zammadCookie };
+    }
+
+    auditLog('login', { username });
+    return res.json({ user: req.session.user });
+  } catch (error) {
+    return res.status(401).json({ error: error.message });
+  }
+});
+
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  auditLog('logout', { user: req.session.user?.id });
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({ user: req.session.user });
+});
+
+app.get('/api/meta', requireAuth, async (req, res) => {
+  try {
+    const meta = await fetchMeta(req.session.zammad);
+    res.json({
+      owners: meta.usersList,
+      states: meta.statesList,
+      priorities: meta.prioritiesList,
+      me: req.session.user
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/tickets', requireAuth, async (req, res) => {
+  try {
+    const view = req.query.view || 'my-open';
+    const search = req.query.q || '';
+    const groupId = await findPowerdnsGroupId(req.session.zammad);
+    const meta = await fetchMeta(req.session.zammad);
+    const query = buildTicketQuery(view, groupId, req.session.user.id, search);
+    const rawTickets = await zammadGet(`/tickets/search?query=${encodeURIComponent(query)}`, req.session.zammad);
+    const tickets = rawTickets.map((t) => mapTicket(t, meta.users, meta.states, meta.priorities));
+    res.json({ tickets });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/tickets/:id', requireAuth, async (req, res) => {
+  try {
+    const ticket = await zammadGet(`/tickets/${req.params.id}`, req.session.zammad);
+    const groupId = await findPowerdnsGroupId(req.session.zammad);
+    if (ticket.group_id !== groupId) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    const articles = await zammadGet(`/ticket_articles/by_ticket/${req.params.id}`, req.session.zammad);
+    res.json({ ticket, articles });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
+  try {
+    const { owner_id, state_id, priority_id } = req.body;
+    const payload = Object.fromEntries(
+      Object.entries({ owner_id, state_id, priority_id }).filter(([, value]) => value !== undefined)
+    );
+    const updated = await zammadPut(`/tickets/${req.params.id}`, payload, req.session.zammad);
+    auditLog('ticket_update', { user: req.session.user.id, ticket: req.params.id, payload });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/tickets/:id/articles', requireAuth, upload.array('attachments'), async (req, res) => {
+  try {
+    const attachments = (req.files || []).map((f) => ({
+      filename: f.originalname,
+      'mime-type': f.mimetype,
+      data: f.buffer.toString('base64')
+    }));
+
+    const body = {
+      ticket_id: Number(req.params.id),
+      body: req.body.body,
+      type: req.body.internal === 'true' ? 'note' : 'email',
+      internal: req.body.internal === 'true',
+      attachments
+    };
+
+    const article = await zammadPost('/ticket_articles', body, req.session.zammad);
+    auditLog('article_create', {
+      user: req.session.user.id,
+      ticket: req.params.id,
+      internal: body.internal,
+      attachment_count: attachments.length
+    });
+    res.json(article);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.listen(config.port, () => {
+  // eslint-disable-next-line no-console
+  console.log(`Backend listening on :${config.port}`);
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
 });
