@@ -1,7 +1,3 @@
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -13,7 +9,7 @@ const multer = require('multer');
 const { audit } = require('./audit');
 const { config, validateConfig } = require('./config');
 const { getPushConfig, removeSubscription, saveSubscription, startNotificationPolling } = require('./notifications');
-const { addArticle, applyMacro, getAttachment, getLookups, getTicket, getWorkflowMacros, listPowerDnsTickets, updateTicket } = require('./zammad');
+const { addArticle, applyMacro, getAttachment, getLookups, getTicket, getWorkflowMacros, listPowerDnsTickets, resolveAssignedOwnerIdForUsername, updateTicket } = require('./zammad');
 
 validateConfig();
 
@@ -27,10 +23,21 @@ app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
-function createSession(username) {
+app.use((req, _res, next) => {
+  if (req.url === config.apiBasePath) {
+    req.url = '/api';
+  } else if (req.url.startsWith(`${config.apiBasePath}/`)) {
+    req.url = `/api/${req.url.slice(`${config.apiBasePath}/`.length)}`;
+  }
+  next();
+});
+
+function createSession(username, assignedOwnerId, remember = false) {
   const token = crypto.randomUUID();
-  const expiresAt = Date.now() + (config.sessionTtlHours * 60 * 60 * 1000);
-  const session = { token, username, expiresAt };
+  const ttlHours = remember ? config.rememberSessionTtlHours : config.sessionTtlHours;
+  const ttlMs = ttlHours * 60 * 60 * 1000;
+  const expiresAt = Date.now() + ttlMs;
+  const session = { token, username, assignedOwnerId, expiresAt, ttlMs, remember };
   sessions.set(token, session);
   return session;
 }
@@ -82,16 +89,22 @@ function toViewPayload(ticket) {
     title: ticket.title,
     queue_key: ticket.queue_key,
     queue_label: ticket.queue_label,
-    customer: ticket.customer ? (ticket.customer.fullname || ticket.customer.email || `User #${ticket.customer.id}`) : 'Unknown customer',
-    state: ticket.state_name,
-    priority: ticket.priority_name,
-    owner: ticket.owner ? (ticket.owner.fullname || ticket.owner.email || `User #${ticket.owner.id}`) : 'Unassigned',
+    customer: ticket.customer,
+    state: ticket.state,
+    priority: ticket.priority,
+    owner: ticket.owner,
     updated_at: ticket.updated_at,
     escalation_at: ticket.escalation_at,
     owner_id: ticket.owner_id,
     customer_id: ticket.customer_id,
+    organization_id: ticket.organization_id,
     state_id: ticket.state_id,
     priority_id: ticket.priority_id,
+    is_new: ticket.is_new,
+    sla_customer: ticket.sla_customer,
+    first_response_escalation_at: ticket.first_response_escalation_at,
+    update_escalation_at: ticket.update_escalation_at,
+    close_escalation_at: ticket.close_escalation_at,
   };
 }
 
@@ -110,47 +123,48 @@ function sortTickets(tickets, sortBy = 'updated') {
   });
 }
 
-function buildViews(tickets, sortBy = 'updated') {
+function buildViews(tickets, assignedOwnerId, sortBy = 'updated') {
   const newTicketSet = new Set(config.powerdns.newTicketStates);
   const openTicketSet = new Set(config.powerdns.openTicketStates);
+  const processingSet = new Set(config.powerdns.processingStates);
   const waitingCustomerSet = new Set(config.powerdns.waitingCustomerStates);
-  const highPriorityNameSet = new Set(config.powerdns.highPriorityNames);
-  const highPriorityIdSet = new Set(config.powerdns.highPriorityIds);
-  const unassignedSet = new Set(config.powerdns.unassignedOwnerIds);
+  const pendingAutocloseSet = new Set(config.powerdns.pendingAutocloseStates);
 
   const views = {
+    allActive: {
+      key: 'allActive',
+      label: 'All active',
+      tickets,
+    },
+    myAssigned: {
+      key: 'myAssigned',
+      label: 'My assigned tickets',
+      tickets: tickets.filter((ticket) => ticket.owner_id === assignedOwnerId),
+    },
     newTickets: {
       key: 'newTickets',
-      label: 'New Tickets',
+      label: 'New',
       tickets: tickets.filter((ticket) => newTicketSet.has(String(ticket.state_name || '').toLowerCase())),
     },
     openTickets: {
       key: 'openTickets',
-      label: 'Open Tickets',
+      label: 'Open',
       tickets: tickets.filter((ticket) => openTicketSet.has(String(ticket.state_name || '').toLowerCase())),
-    },
-    myOpen: {
-      key: 'myOpen',
-      label: 'My Open Tickets',
-      tickets: tickets.filter((ticket) => ticket.owner_id === config.powerdns.defaultOwnerId),
-    },
-    unassigned: {
-      key: 'unassigned',
-      label: 'Unassigned PowerDNS Tickets',
-      tickets: tickets.filter((ticket) => !ticket.owner_id || unassignedSet.has(ticket.owner_id)),
     },
     waitingCustomer: {
       key: 'waitingCustomer',
-      label: 'Waiting for Customer',
+      label: 'Waiting for customer',
       tickets: tickets.filter((ticket) => waitingCustomerSet.has(String(ticket.state_name || '').toLowerCase())),
     },
-    escalated: {
-      key: 'escalated',
-      label: 'Escalated / High Priority',
-      tickets: tickets.filter((ticket) => {
-        const priorityName = String(ticket.priority_name || '').toLowerCase();
-        return Boolean(ticket.escalation_at) || highPriorityNameSet.has(priorityName) || highPriorityIdSet.has(ticket.priority_id);
-      }),
+    pendingAutoclose: {
+      key: 'pendingAutoclose',
+      label: 'Pending auto-close',
+      tickets: tickets.filter((ticket) => pendingAutocloseSet.has(String(ticket.state_name || '').toLowerCase())),
+    },
+    processing: {
+      key: 'processing',
+      label: 'Processing',
+      tickets: tickets.filter((ticket) => processingSet.has(String(ticket.state_name || '').toLowerCase())),
     },
   };
 
@@ -171,24 +185,25 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body || {};
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password, remember } = req.body || {};
   if (username !== config.appUser || password !== config.appPassword) {
     audit('auth.login_failed', { username: username || '' });
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
-  const session = createSession(username);
+  const assignedOwnerId = await resolveAssignedOwnerIdForUsername(username);
+  const session = createSession(username, assignedOwnerId, Boolean(remember));
   res.cookie(config.sessionCookieName, session.token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: false,
-    maxAge: config.sessionTtlHours * 60 * 60 * 1000,
+    secure: config.sessionCookieSecure,
+    maxAge: session.ttlMs,
   });
-  audit('auth.login', { username });
+  audit('auth.login', { username, remember: Boolean(remember) });
   return res.json({
     username,
-    defaultOwnerId: config.powerdns.defaultOwnerId,
+    defaultOwnerId: assignedOwnerId,
     readOnlyMode: config.readOnlyMode,
   });
 });
@@ -200,22 +215,28 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
   res.status(204).end();
 });
 
-app.get('/api/auth/session', (req, res) => {
+app.get('/api/auth/session', async (req, res) => {
   const session = getSession(req);
   if (!session) {
     return res.status(401).json({ error: 'No active session' });
   }
 
+  const assignedOwnerId = session.assignedOwnerId || await resolveAssignedOwnerIdForUsername(session.username);
   return res.json({
     username: session.username,
-    defaultOwnerId: config.powerdns.defaultOwnerId,
+    defaultOwnerId: assignedOwnerId,
     readOnlyMode: config.readOnlyMode,
   });
 });
 
-app.get('/api/lookups', requireAuth, async (_req, res, next) => {
+app.get('/api/lookups', requireAuth, async (req, res, next) => {
   try {
-    return res.json(await getLookups());
+    const lookups = await getLookups();
+    const assignedOwnerId = req.session.assignedOwnerId || await resolveAssignedOwnerIdForUsername(req.session.username);
+    return res.json({
+      ...lookups,
+      defaultOwnerId: assignedOwnerId,
+    });
   } catch (error) {
     return next(error);
   }
@@ -257,12 +278,13 @@ app.get('/api/tickets', requireAuth, async (req, res, next) => {
     const queue = String(req.query.queue || 'all').trim() || 'all';
     const sortBy = String(req.query.sort || 'updated').trim() || 'updated';
     const tickets = await listPowerDnsTickets(search, queue);
+    const assignedOwnerId = req.session.assignedOwnerId || await resolveAssignedOwnerIdForUsername(req.session.username);
     return res.json({
       generatedAt: new Date().toISOString(),
       search,
       queue,
       sort: sortBy,
-      views: buildViews(tickets, sortBy),
+      views: buildViews(tickets, assignedOwnerId, sortBy),
     });
   } catch (error) {
     return next(error);
@@ -367,6 +389,9 @@ app.get('/api/tickets/:ticketId/attachments/:articleId/:attachmentId', requireAu
 
 if (fs.existsSync(config.frontendDistPath)) {
   app.use(express.static(config.frontendDistPath));
+  if (config.frontendBasePath !== '/') {
+    app.use(config.frontendBasePath, express.static(config.frontendDistPath));
+  }
   app.get(/^\/(?!api|health).*/, (req, res, next) => {
     if (req.path.startsWith('/api') || req.path === '/health') {
       return next();
@@ -383,204 +408,8 @@ app.use((error, _req, res, _next) => {
   });
 });
 
-app.listen(config.port, () => {
+app.listen(config.port, config.host, () => {
   fs.mkdirSync(path.dirname(config.auditLogPath), { recursive: true });
-  console.log(`Zammad mobile backend listening on http://localhost:${config.port}`);
+  console.log(`Zammad mobile backend listening on http://${config.host}:${config.port}${config.frontendBasePath}`);
   startNotificationPolling();
-=======
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import session from 'express-session';
-import morgan from 'morgan';
-import multer from 'multer';
-import { config, ensureConfig } from './config.js';
-import { auditLog } from './audit.js';
-import {
-  buildTicketQuery,
-  findPowerdnsGroupId,
-  mapTicket,
-  zammadGet,
-  zammadPost,
-  zammadPut,
-  zammadSignin
-} from './zammadClient.js';
-
-ensureConfig();
-
-const upload = multer();
-const app = express();
-
-app.use(helmet());
-app.use(cors({ origin: config.frontendUrl, credentials: true }));
-app.use(express.json({ limit: '10mb' }));
-app.use(morgan('tiny'));
-app.use(
-  session({
-    secret: config.sessionSecret,
-    resave: false,
-    saveUninitialized: false,
-    cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }
-  })
-);
-
-function requireAuth(req, res, next) {
-  if (!req.session.user) return res.status(401).json({ error: 'Unauthorized' });
-  next();
-}
-
-async function fetchMeta(sessionData) {
-  const [users, states, priorities] = await Promise.all([
-    zammadGet('/users/search?query=*', sessionData),
-    zammadGet('/ticket_states', sessionData),
-    zammadGet('/ticket_priorities', sessionData)
-  ]);
-
-  return {
-    users: Object.fromEntries(users.map((u) => [u.id, u])),
-    states: Object.fromEntries(states.map((s) => [s.id, s])),
-    priorities: Object.fromEntries(priorities.map((p) => [p.id, p])),
-    usersList: users,
-    statesList: states,
-    prioritiesList: priorities
-  };
-}
-
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-
-    if (config.zammadAuthMode === 'token') {
-      if (username !== config.proxyUsername || password !== config.proxyPassword) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
-      req.session.user = { id: 0, fullname: username };
-      req.session.zammad = null;
-    } else {
-      const signin = await zammadSignin(username, password);
-      req.session.user = signin.profile;
-      req.session.zammad = { zammadCookie: signin.zammadCookie };
-    }
-
-    auditLog('login', { username });
-    return res.json({ user: req.session.user });
-  } catch (error) {
-    return res.status(401).json({ error: error.message });
-  }
-});
-
-app.post('/api/auth/logout', requireAuth, (req, res) => {
-  auditLog('logout', { user: req.session.user?.id });
-  req.session.destroy(() => res.json({ ok: true }));
-});
-
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json({ user: req.session.user });
-});
-
-app.get('/api/meta', requireAuth, async (req, res) => {
-  try {
-    const meta = await fetchMeta(req.session.zammad);
-    res.json({
-      owners: meta.usersList,
-      states: meta.statesList,
-      priorities: meta.prioritiesList,
-      me: req.session.user
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/tickets', requireAuth, async (req, res) => {
-  try {
-    const view = req.query.view || 'my-open';
-    const search = req.query.q || '';
-    const groupId = await findPowerdnsGroupId(req.session.zammad);
-    const meta = await fetchMeta(req.session.zammad);
-    const query = buildTicketQuery(view, groupId, req.session.user.id, search);
-    const rawTickets = await zammadGet(`/tickets/search?query=${encodeURIComponent(query)}`, req.session.zammad);
-    const tickets = rawTickets.map((t) => mapTicket(t, meta.users, meta.states, meta.priorities));
-    res.json({ tickets });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/tickets/:id', requireAuth, async (req, res) => {
-  try {
-    const ticket = await zammadGet(`/tickets/${req.params.id}`, req.session.zammad);
-    const groupId = await findPowerdnsGroupId(req.session.zammad);
-    if (ticket.group_id !== groupId) {
-      return res.status(404).json({ error: 'Ticket not found' });
-    }
-    const articles = await zammadGet(`/ticket_articles/by_ticket/${req.params.id}`, req.session.zammad);
-    res.json({ ticket, articles });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.patch('/api/tickets/:id', requireAuth, async (req, res) => {
-  try {
-    const { owner_id, state_id, priority_id } = req.body;
-    const payload = Object.fromEntries(
-      Object.entries({ owner_id, state_id, priority_id }).filter(([, value]) => value !== undefined)
-    );
-    const updated = await zammadPut(`/tickets/${req.params.id}`, payload, req.session.zammad);
-    auditLog('ticket_update', { user: req.session.user.id, ticket: req.params.id, payload });
-    res.json(updated);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/tickets/:id/articles', requireAuth, upload.array('attachments'), async (req, res) => {
-  try {
-    const attachments = (req.files || []).map((f) => ({
-      filename: f.originalname,
-      'mime-type': f.mimetype,
-      data: f.buffer.toString('base64')
-    }));
-
-    const body = {
-      ticket_id: Number(req.params.id),
-      body: req.body.body,
-      type: req.body.internal === 'true' ? 'note' : 'email',
-      internal: req.body.internal === 'true',
-      attachments
-    };
-
-    const article = await zammadPost('/ticket_articles', body, req.session.zammad);
-    auditLog('article_create', {
-      user: req.session.user.id,
-      ticket: req.params.id,
-      internal: body.internal,
-      attachment_count: attachments.length
-    });
-    res.json(article);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.listen(config.port, () => {
-  // eslint-disable-next-line no-console
-  console.log(`Backend listening on :${config.port}`);
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
 });

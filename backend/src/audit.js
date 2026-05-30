@@ -1,7 +1,3 @@
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
 const fs = require('node:fs');
 const path = require('node:path');
 const { config } = require('./config');
@@ -24,31 +20,3 @@ function audit(action, payload = {}) {
 module.exports = {
   audit,
 };
-=======
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-import fs from 'fs';
-import { config } from './config.js';
-
-export function auditLog(event, payload = {}) {
-  const line = JSON.stringify({
-    timestamp: new Date().toISOString(),
-    event,
-    ...payload
-  });
-  fs.appendFile(config.auditLogPath, `${line}\n`, () => {});
-}
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs

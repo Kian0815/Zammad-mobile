@@ -27,11 +27,11 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  login(username: string, password: string) {
+  login(username: string, password: string, remember = false) {
     return request<Session>(`${apiBase}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, remember }),
     });
   },
   logout() {

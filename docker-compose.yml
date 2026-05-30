@@ -1,59 +1,24 @@
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
 services:
   zammad-mobile:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
-        VITE_API_BASE: ${VITE_API_BASE:-/api}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/zammad/}
+        VITE_API_BASE: ${VITE_API_BASE:-/zammad-api}
+        VITE_AUTO_REFRESH_SECONDS: ${VITE_AUTO_REFRESH_SECONDS:-60}
     env_file:
       - .env
+    environment:
+      HOST: ${HOST:-0.0.0.0}
     ports:
-      - "3001:3001"
+      - "${DOCKER_BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-3001}:${PORT:-3001}"
     volumes:
       - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:${PORT:-3001}/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
-=======
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-version: '3.9'
-services:
-  backend:
-    build: ./backend
-    env_file:
-      - .env
-    ports:
-      - "4000:4000"
-    volumes:
-      - ./backend/src:/app/src
-      - ./backend/audit.log:/app/audit.log
-
-  frontend:
-    build: ./frontend
-    environment:
-      - VITE_API_BASE=http://localhost:4000
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-    depends_on:
-      - backend
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs

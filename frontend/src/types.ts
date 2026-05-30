@@ -1,4 +1,4 @@
-export type ViewKey = 'newTickets' | 'openTickets' | 'myOpen' | 'unassigned' | 'waitingCustomer' | 'escalated';
+export type ViewKey = 'allActive' | 'myAssigned' | 'newTickets' | 'openTickets' | 'waitingCustomer' | 'pendingAutoclose' | 'processing';
 
 export type Session = {
   username: string;
@@ -20,9 +20,14 @@ export type TicketCard = {
   escalation_at?: string | null;
   owner_id: number | null;
   customer_id: number | null;
+  organization_id: number | null;
   state_id: number;
   priority_id: number;
   is_new?: boolean;
+  sla_customer?: string | null;
+  first_response_escalation_at?: string | null;
+  update_escalation_at?: string | null;
+  close_escalation_at?: string | null;
 };
 
 export type TicketView = {
@@ -89,6 +94,9 @@ export type TicketArticle = {
   internal: boolean;
   type: string;
   sender: string;
+  from?: string | null;
+  to?: string | null;
+  cc?: string | null;
   created_at: string;
   created_by: string;
   attachments: ArticleAttachment[];
@@ -118,7 +126,17 @@ export type TicketDetail = {
     fullname?: string;
     email?: string;
   } | null;
+  organization_id?: number | null;
+  sla_customer?: string | null;
   updated_at: string;
   escalation_at?: string | null;
+  first_response_escalation_at?: string | null;
+  update_escalation_at?: string | null;
+  close_escalation_at?: string | null;
+  reply_recipients?: {
+    to: string | null;
+    cc: string[];
+    source_article_id: number | null;
+  };
   articles: TicketArticle[];
 };

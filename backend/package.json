@@ -1,8 +1,4 @@
 {
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
   "name": "backend",
   "version": "1.0.0",
   "description": "Express proxy for the Zammad PowerDNS mobile PWA",
@@ -22,7 +18,7 @@
   "dependencies": {
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
+    "dotenv": "^17.4.0",
     "express": "^5.2.1",
     "form-data": "^4.0.5",
     "morgan": "^1.10.1",
@@ -30,41 +26,6 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
-=======
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-  "name": "zammad-pdns-proxy",
-  "version": "0.1.0",
-  "type": "module",
-  "main": "src/server.js",
-  "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
-  },
-  "dependencies": {
-    "axios": "^1.9.0",
-    "cookie-parser": "^1.4.7",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.2",
-    "express-session": "^1.18.1",
-    "helmet": "^8.0.0",
-    "morgan": "^1.10.0",
-    "multer": "^1.4.5-lts.1"
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
+    "nodemon": "^3.1.11"
   }
 }

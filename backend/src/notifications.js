@@ -3,7 +3,7 @@ const path = require('node:path');
 const webpush = require('web-push');
 const { audit } = require('./audit');
 const { config } = require('./config');
-const { listPowerDnsTickets } = require('./zammad');
+const { getTicket, listPowerDnsTickets, resolveAssignedOwnerIdForUsername } = require('./zammad');
 
 let pollingStarted = false;
 
@@ -89,11 +89,27 @@ function snapshotTicket(ticket) {
     number: ticket.number,
     title: ticket.title,
     updated_at: ticket.updated_at,
+    owner: ticket.owner || null,
     owner_id: ticket.owner_id,
     state_name: ticket.state_name,
     priority_name: ticket.priority_name,
     priority_id: ticket.priority_id,
     escalation_at: ticket.escalation_at || null,
+    latest_article_id: ticket.latest_article_id || null,
+    latest_article_sender: ticket.latest_article_sender || null,
+  };
+}
+
+function latestVisibleArticle(ticketDetail) {
+  return (ticketDetail?.articles || []).find((article) => !article.internal) || null;
+}
+
+function snapshotFromDetail(ticket, ticketDetail, previous = null) {
+  const latestArticle = latestVisibleArticle(ticketDetail);
+  return {
+    ...snapshotTicket(ticket),
+    latest_article_id: latestArticle?.id || previous?.latest_article_id || null,
+    latest_article_sender: String(latestArticle?.sender || previous?.latest_article_sender || '').toLowerCase() || null,
   };
 }
 
@@ -148,10 +164,8 @@ async function sendNotificationToAll(payload, eventKey) {
   }
 }
 
-function deriveEvents(currentTickets, previousTickets, deliveredEventKeys) {
+function deriveEvents(currentTickets, previousTickets, deliveredEventKeys, assignedOwnerId) {
   const delivered = new Set(deliveredEventKeys);
-  const newStateSet = new Set(config.powerdns.newTicketStates);
-  const openStateSet = new Set(config.powerdns.openTicketStates);
   const events = [];
 
   for (const ticket of currentTickets) {
@@ -161,48 +175,44 @@ function deriveEvents(currentTickets, previousTickets, deliveredEventKeys) {
     if (!previous) {
       candidates.push({
         eventKey: `new:${ticket.id}:${ticket.updated_at}`,
-        title: `New PowerDNS ticket #${ticket.number}`,
+        title: `New ticket #${ticket.number}`,
         body: ticket.title,
         tag: `ticket-new-${ticket.id}`,
         url: buildNotificationUrl(ticket.id),
       });
     } else {
-      if (isEscalated(ticket) && !isEscalated(previous)) {
+      if (previous.owner_id !== assignedOwnerId && ticket.owner_id === assignedOwnerId) {
+        candidates.push({
+          eventKey: `assigned:${ticket.id}:${ticket.updated_at}:${assignedOwnerId}`,
+          title: `Assigned to: ${ticket.owner || 'you'}`,
+          body: ticket.title,
+          tag: `ticket-assigned-${ticket.id}`,
+          url: buildNotificationUrl(ticket.id),
+        });
+      }
+
+      if (
+        previous.updated_at !== ticket.updated_at &&
+        previous.latest_article_id &&
+        ticket.latest_article_id &&
+        ticket.latest_article_id !== previous.latest_article_id &&
+        ticket.latest_article_sender === 'customer'
+      ) {
+        candidates.push({
+          eventKey: `customer-update:${ticket.id}:${ticket.latest_article_id}`,
+          title: `Update to ${ticket.title}`,
+          body: `Customer update on #${ticket.number}`,
+          tag: `ticket-customer-update-${ticket.id}`,
+          url: buildNotificationUrl(ticket.id),
+        });
+      }
+
+      if (candidates.length === 0 && isEscalated(ticket) && !isEscalated(previous) && ticket.latest_article_sender === 'customer') {
         candidates.push({
           eventKey: `escalated:${ticket.id}:${ticket.updated_at}`,
-          title: `Escalated or high priority #${ticket.number}`,
+          title: `Escalated update #${ticket.number}`,
           body: `${ticket.priority_name} · ${ticket.title}`,
           tag: `ticket-escalated-${ticket.id}`,
-          url: buildNotificationUrl(ticket.id),
-        });
-      }
-
-      if (isInStateSet(ticket, newStateSet) && !isInStateSet(previous, newStateSet)) {
-        candidates.push({
-          eventKey: `state-new:${ticket.id}:${ticket.updated_at}`,
-          title: `Ticket is new #${ticket.number}`,
-          body: ticket.title,
-          tag: `ticket-state-new-${ticket.id}`,
-          url: buildNotificationUrl(ticket.id),
-        });
-      }
-
-      if (isInStateSet(ticket, openStateSet) && !isInStateSet(previous, openStateSet)) {
-        candidates.push({
-          eventKey: `state-open:${ticket.id}:${ticket.updated_at}`,
-          title: `Ticket is open #${ticket.number}`,
-          body: ticket.title,
-          tag: `ticket-state-open-${ticket.id}`,
-          url: buildNotificationUrl(ticket.id),
-        });
-      }
-
-      if (previous.updated_at !== ticket.updated_at && ticket.owner_id === config.powerdns.defaultOwnerId) {
-        candidates.push({
-          eventKey: `assigned-update:${ticket.id}:${ticket.updated_at}`,
-          title: `Assigned ticket updated #${ticket.number}`,
-          body: ticket.title,
-          tag: `ticket-update-${ticket.id}`,
           url: buildNotificationUrl(ticket.id),
         });
       }
@@ -219,8 +229,22 @@ function deriveEvents(currentTickets, previousTickets, deliveredEventKeys) {
 
 async function pollNotifications() {
   try {
-    const currentTickets = (await listPowerDnsTickets('', 'all')).map(snapshotTicket);
+    const currentTicketCards = await listPowerDnsTickets('', 'all');
     const state = loadNotificationState();
+    const assignedOwnerId = await resolveAssignedOwnerIdForUsername(config.appUser);
+    const changedTickets = currentTicketCards.filter((ticket) => {
+      const previous = state.tickets?.[ticket.id];
+      return !previous || previous.updated_at !== ticket.updated_at || previous.owner_id !== ticket.owner_id;
+    });
+    const ticketDetails = await Promise.all(changedTickets.map(async (ticket) => {
+      try {
+        return [ticket.id, await getTicket(ticket.id)];
+      } catch (_error) {
+        return [ticket.id, null];
+      }
+    }));
+    const detailMap = new Map(ticketDetails);
+    const currentTickets = currentTicketCards.map((ticket) => snapshotFromDetail(ticket, detailMap.get(ticket.id), state.tickets?.[ticket.id]));
 
     if (!state.tickets || Object.keys(state.tickets).length === 0) {
       saveNotificationState({
@@ -230,7 +254,7 @@ async function pollNotifications() {
       return;
     }
 
-    const events = deriveEvents(currentTickets, state.tickets, state.deliveredEventKeys || []);
+    const events = deriveEvents(currentTickets, state.tickets, state.deliveredEventKeys || [], assignedOwnerId);
     for (const event of events) {
       await sendNotificationToAll({
         title: event.title,

@@ -1,7 +1,9 @@
 {
   "name": "PowerDNS Ticket Desk",
   "short_name": "PowerDNS Desk",
+  "id": "./",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#111827",
