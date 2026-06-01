@@ -1,77 +1,58 @@
-# Zammad Mobile for PowerDNS
+# Zammad Mobile
 
-Mobile-first React PWA plus a small Express proxy for working only on PowerDNS tickets in Zammad.
+Zammad Mobile is a mobile-first web app for working on a focused subset of Zammad tickets through a small server-side proxy. It keeps Zammad credentials on the backend, exposes a touch-friendly PWA interface, and supports lightweight deployment with Docker Compose.
 
-## What this MVP includes
+## What It Does
 
-- backend proxy that keeps the Zammad token or session cookie on the server
-- app login handled separately from Zammad, backed by `.env`
-- PowerDNS-only queue filtering using the same Zammad URL and token source as the local `auto-recat` project
-- four focused views:
-  - My Open Tickets
-  - Unassigned PowerDNS Tickets
-  - Waiting for Customer
-  - Escalated / High Priority
-- ticket cards with number, title, customer, state, priority, owner, and `updated_at`
-- ticket detail with the full article thread
-- clear distinction between internal notes and customer-visible replies
-- reply or internal note composer
-- owner, state, and priority updates
-- attachment upload and attachment download proxy
-- search by ticket number or subject
-- mobile-first queue tabs with touch swipe between views
-- installable PWA assets and service worker registration
-- audit log written as JSON lines to `logs/audit.log`
+- Provides a separate app login for the mobile UI
+- Proxies Zammad API access through Express so browser clients never receive the Zammad token or session cookie
+- Filters ticket views around PowerDNS-oriented queues and workflow states
+- Supports ticket browsing, search, detail views, replies, internal notes, owner changes, state changes, priority updates, and attachments
+- Includes installable PWA metadata and service worker support
+- Writes audit events to local log files
+- Supports optional web push notifications
 
 ## Stack
 
-- frontend: React + Vite + React Query
-- backend: Node.js + Express
-- deploy: Docker multi-stage build + Docker Compose
+- Frontend: React, TypeScript, Vite, TanStack Query
+- Backend: Node.js, Express
+- Deployment: Docker multi-stage build and Docker Compose
 
 ## Configuration
 
-Copy the sample env:
+Create a local env file:
 
 ```bash
 cp .env.example .env
 ```
 
-The backend loads `.env` first and then optionally falls back to `/Users/afrisina/auto-recat/.env` when `ZAMMAD_URL` or `ZAMMAD_TOKEN` are missing locally. That gives you the same API key source as the `auto-recat` project without exposing it to the browser.
-
 Important variables:
 
-- `APP_USERNAME` and `APP_PASSWORD`: credentials for logging into this mobile app
-- `APP_USER_OWNER_MAP`: optional mapping between app usernames and Zammad owner IDs, example `agent:214,todd:87`
-- `HOST`: bind address used by the packaged Express app
-- `DOCKER_BIND_ADDRESS`: host-side bind address for Docker port publishing, use `127.0.0.1` for local-only or `0.0.0.0` for LAN/Tailscale reachability
-- `HOST_PORT`: host-side published port for Docker, defaults to `3001`
-- `SESSION_COOKIE_SECURE`: set to `true` when you front the app with HTTPS such as Tailscale Serve
-- `READ_ONLY_MODE`: set to `true` to block all ticket updates and article posting while still allowing browsing
-- `ZAMMAD_URL`: your Zammad base URL
+- `APP_USERNAME` and `APP_PASSWORD`: credentials for the app login
+- `APP_USER_OWNER_MAP`: optional mapping from app username to default Zammad owner ID, for example `agent:123`
+- `APP_USER_ZAMMAD_EMAIL_MAP`: optional mapping from app username to Zammad email, used to resolve the matching Zammad user dynamically
+- `SESSION_TTL_HOURS` and `REMEMBER_SESSION_TTL_HOURS`: session lifetime settings
+- `SESSION_COOKIE_NAME` and `SESSION_COOKIE_SECURE`: session cookie settings
+- `READ_ONLY_MODE`: when `true`, blocks ticket updates and article creation
+- `ZAMMAD_URL`: base URL of your Zammad instance
 - `ZAMMAD_AUTH_MODE`: `token` or `session`
-- `ZAMMAD_TOKEN`: use the same value already used by `auto-recat`
-- `ZAMMAD_SESSION_COOKIE`: optional alternative to token auth
-- `POWERDNS_GROUP_ID`: numeric PowerDNS group ID for single-group setups
-- `POWERDNS_GROUP_IDS`: comma-separated PowerDNS group IDs for tenants that split queues across multiple PowerDNS groups
-- `POWERDNS_ORGANIZATION_IDS`: comma-separated PowerDNS organization IDs for B2B queue scoping
-- `POWERDNS_CUSTOMER_IDS`: optional comma-separated customer IDs to keep the queue scoped to PowerDNS customers
-- `POWERDNS_DEFAULT_OWNER_ID`: fallback owner when no per-user mapping is configured; seeded to `214` from `auto-recat`
-- `POWERDNS_OWNER_OPTIONS`: owner choices shown in the UI, example `214:Antonio Frisina,87:Another Agent`
-- `PUBLIC_APP_URL`: full externally reachable app URL used in push notification links, for example `http://192.168.1.20:3001/zammad/` or `https://your-mac.tailnet.ts.net/zammad/`
-- `VITE_BASE_PATH` and `VITE_API_BASE`: frontend and backend base paths, defaulting to `/zammad/` and `/zammad-api`
+- `ZAMMAD_TOKEN`: API token when using token auth
+- `ZAMMAD_SESSION_COOKIE`: alternative to token auth
+- `ZAMMAD_FALLBACK_ENV_PATH`: optional path to another env file that already contains `ZAMMAD_URL` and `ZAMMAD_TOKEN`
+- `POWERDNS_GROUP_ID` or `POWERDNS_GROUP_IDS`: queue scoping for the ticket views
+- `POWERDNS_GROUP_NAME`: label used for the grouped queue
+- `POWERDNS_ORGANIZATION_IDS` and `POWERDNS_CUSTOMER_IDS`: optional extra scoping filters
+- `POWERDNS_DEFAULT_OWNER_ID`: fallback owner used when no per-user mapping is available
+- `POWERDNS_OWNER_OPTIONS`: comma-separated owner options shown in the UI, for example `123:Primary Agent,456:Secondary Agent`
+- `POWERDNS_WORKFLOW_MACROS`: optional fallback macro list when macros cannot be loaded dynamically
+- `PUBLIC_APP_URL`: externally reachable base URL used in push-notification links
+- `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, and `VAPID_PRIVATE_KEY`: required only for push notifications
+- `HOST`, `PORT`, `DOCKER_BIND_ADDRESS`, and `HOST_PORT`: runtime and published port settings
+- `VITE_BASE_PATH` and `VITE_API_BASE`: frontend and backend base paths
 
-When `POWERDNS_ORGANIZATION_IDS` is set, it takes precedence over `POWERDNS_CUSTOMER_IDS`. This is usually the better fit for shared support organizations.
+When `POWERDNS_ORGANIZATION_IDS` is set, it takes precedence over `POWERDNS_CUSTOMER_IDS`.
 
-If your tenant uses different workflow naming, tune:
-
-- `WAITING_CUSTOMER_STATE_NAMES`
-- `HIGH_PRIORITY_NAMES`
-- `HIGH_PRIORITY_IDS`
-- `UNASSIGNED_OWNER_IDS`
-- `OPEN_STATE_EXCLUSIONS`
-
-## Local development
+## Local Development
 
 Run the backend:
 
@@ -89,99 +70,68 @@ npm install
 npm run dev
 ```
 
-The Vite dev server proxies `/api` and `/health` to `http://localhost:3001`.
+The frontend dev server proxies API requests to `http://localhost:3001`.
 
-## Docker
+## Deploy With Docker Compose
 
-Build and run the packaged app:
-
-```bash
-docker compose up --build
-```
-
-The container serves the compiled frontend and the API from the same Express server on port `3001`.
-
-### Run entirely on your Mac
-
-For a local-only Docker setup on macOS:
+Build and start the app:
 
 ```bash
 cp .env.example .env
 docker compose up --build -d
 ```
 
-That publishes `127.0.0.1:3001` by default, so the app is available only on the Mac itself.
+By default, Docker publishes the app on `127.0.0.1:3001`. That is a good default when you plan to place the app behind a reverse proxy, VPN access layer, or HTTPS tunnel.
 
-To expose it directly on your LAN or over the Mac's Tailscale IP, set these in `.env` before starting:
+Example LAN-accessible settings:
 
-```bash
+```dotenv
 HOST=0.0.0.0
 DOCKER_BIND_ADDRESS=0.0.0.0
 HOST_PORT=3001
-PUBLIC_APP_URL=http://YOUR-MAC-IP:3001/zammad/
+PUBLIC_APP_URL=http://your-host-or-ip:3001/zammad/
 ```
 
-Then open:
+Example reverse-proxy or tunnel-friendly settings:
 
-```text
-http://YOUR-MAC-IP:3001/zammad/
-```
-
-### Tailscale-recommended setup
-
-For tailnet-only access with HTTPS, keep Docker published on localhost and let Tailscale proxy it:
-
-```bash
+```dotenv
 HOST=0.0.0.0
 DOCKER_BIND_ADDRESS=127.0.0.1
 HOST_PORT=3001
 SESSION_COOKIE_SECURE=true
-docker compose up --build -d
-tailscale serve --bg 3001
+PUBLIC_APP_URL=https://support.example.com/zammad/
 ```
 
-Then set `PUBLIC_APP_URL` to the HTTPS URL shown by `tailscale serve`, for example:
+Once the container is running, the app serves both the frontend and API from the same Express process.
 
-```text
-https://your-mac.tailnet.ts.net/zammad/
-```
+## Deployment Notes
 
-This is the cleaner option for iPhone/PWA use because it gives you HTTPS without opening the app on your whole LAN.
+- Use HTTPS whenever the app is reachable outside the local machine
+- Set `SESSION_COOKIE_SECURE=true` when the public URL is HTTPS
+- Make sure `PUBLIC_APP_URL` matches the real user-facing URL so push links open correctly
+- Keep `.env`, `logs/`, and any local CSV mapping files out of version control
+- If you need a simple remote sync helper, use `scripts/deploy-big-vm.sh` and override `REMOTE_HOST` and `REMOTE_PATH` as needed
 
-## Notes about iPhone install
+## Push Notifications
 
-This repo includes a web manifest, service worker registration, and standalone-capable metadata. For real iPhone installation outside localhost, serve it through HTTPS on a reachable hostname or reverse proxy.
+Push notifications are optional. To enable them:
 
-## API integration layer
+1. Generate VAPID keys
+2. Set `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, and `VAPID_PRIVATE_KEY`
+3. Set `PUBLIC_APP_URL` to the real public HTTPS URL
+4. Redeploy the app
 
-The Zammad integration lives in:
+## Security Model
 
-- [backend/src/zammad.js](/Users/afrisina/repositories/Zammad-mobile/backend/src/zammad.js)
-- [backend/src/config.js](/Users/afrisina/repositories/Zammad-mobile/backend/src/config.js)
+- Zammad credentials stay on the server
+- The browser talks only to the local backend
+- The app uses its own session cookie for access control
+- `READ_ONLY_MODE` can disable all write operations
+- Audit logs capture auth activity and ticket mutations
 
-It currently uses these official Zammad REST endpoints:
+## Repository Layout
 
-- `GET /api/v1/tickets`
-- `GET /api/v1/tickets/search`
-- `GET /api/v1/tickets/:id`
-- `PUT /api/v1/tickets/:id`
-- `GET /api/v1/ticket_articles/by_ticket/:id`
-- `POST /api/v1/ticket_articles`
-- `GET /api/v1/ticket_attachment/:ticketId/:articleId/:attachmentId`
-- `GET /api/v1/ticket_states`
-- `GET /api/v1/ticket_priorities`
-- `GET /api/v1/users/:id`
-
-## Security model
-
-- the browser never receives the Zammad API token
-- credentials stay in `.env`
-- the app uses an app-level session cookie for login
-- read-only mode can block all write operations server-side against the live helpdesk
-- every ticket update, article creation, attachment download, and auth event is audit logged
-
-## Current MVP trade-offs
-
-- owner options are preset from env for predictability instead of dynamically listing every Zammad agent
-- “My assigned tickets” uses `APP_USER_OWNER_MAP` when present and falls back to `POWERDNS_DEFAULT_OWNER_ID`
-- search uses the dedicated ticket search endpoint when available and falls back to the ticket list endpoint if needed
+- `backend/`: Express API, Zammad integration, notifications, and config parsing
+- `frontend/`: React PWA client
+- `docker-compose.yml`: single-container runtime definition
+- `scripts/`: optional deployment helpers

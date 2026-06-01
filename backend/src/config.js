@@ -9,9 +9,9 @@ if (fs.existsSync(localEnvPath)) {
   dotenv.config({ path: localEnvPath, quiet: true });
 }
 
-const fallbackAutoRecatEnv = process.env.AUTO_RECAT_ENV_PATH || '/Users/afrisina/auto-recat/.env';
-if ((!process.env.ZAMMAD_TOKEN || !process.env.ZAMMAD_URL) && fallbackAutoRecatEnv && fs.existsSync(fallbackAutoRecatEnv)) {
-  dotenv.config({ path: fallbackAutoRecatEnv, override: false, quiet: true });
+const fallbackEnvPath = process.env.ZAMMAD_FALLBACK_ENV_PATH || process.env.AUTO_RECAT_ENV_PATH || '';
+if ((!process.env.ZAMMAD_TOKEN || !process.env.ZAMMAD_URL) && fallbackEnvPath && fs.existsSync(fallbackEnvPath)) {
+  dotenv.config({ path: fallbackEnvPath, override: false, quiet: true });
 }
 
 function parseIntValue(value, fallback = null) {
@@ -277,8 +277,8 @@ const config = {
     organizationIds: parseIntList(process.env.POWERDNS_ORGANIZATION_IDS),
     customerIds: parseIntList(process.env.POWERDNS_CUSTOMER_IDS),
     requireAccountFilter: parseBoolean(process.env.POWERDNS_REQUIRE_ACCOUNT_FILTER, false),
-    defaultOwnerId: parseIntValue(process.env.POWERDNS_DEFAULT_OWNER_ID, 214),
-    ownerOptions: parseOwnerOptions(process.env.POWERDNS_OWNER_OPTIONS || '214:Antonio Frisina'),
+    defaultOwnerId: parseIntValue(process.env.POWERDNS_DEFAULT_OWNER_ID, null),
+    ownerOptions: parseOwnerOptions(process.env.POWERDNS_OWNER_OPTIONS || ''),
     workflowMacros: parseMacroOptions(
       process.env.POWERDNS_WORKFLOW_MACROS,
       'waitingCustomer:2:Waiting for customer +7d,processing:18:Processing +7d,pendingAutoclose3:16:Pending autoclose +3d',
@@ -364,7 +364,7 @@ function resolveAssignedUserEmail(username) {
 
 function validateConfig() {
   if (!config.zammad.url) {
-    throw new Error('ZAMMAD_URL is required. Set it in .env or point AUTO_RECAT_ENV_PATH to the auto-recat env file.');
+    throw new Error('ZAMMAD_URL is required. Set it in .env or point ZAMMAD_FALLBACK_ENV_PATH to a shared env file.');
   }
 
   if (config.zammad.authMode === 'token' && !config.zammad.token) {
